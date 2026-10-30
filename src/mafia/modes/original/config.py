@@ -19,7 +19,8 @@ class OriginalConfig(BaseModel):
     doctor_repeat_protect: bool = False
     reveal_role_on_death: bool = False
     max_days: int = Field(default=10, ge=2, le=30)
-    start_with_night: bool = False
+    # Classic table flow: the game opens at night, someone may die, then day breaks.
+    start_with_night: bool = True
 
     @model_validator(mode="after")
     def _check_roles(self) -> OriginalConfig:

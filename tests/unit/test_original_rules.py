@@ -84,7 +84,7 @@ class TestSetup:
 
 class TestDay:
     def test_discussion_is_sequential_and_covers_everyone_each_round(self) -> None:
-        table = Table(config=OriginalConfig(discussion_rounds=2))
+        table = Table(config=OriginalConfig(discussion_rounds=2, start_with_night=False))
         speakers: list[int] = []
         while table.mode.phase.value == "discussion":
             (request,) = table.requests()  # exactly one speaker at a time
@@ -317,3 +317,20 @@ class TestEnding:
         ]
         assert later
         assert all(r.seat != victim for r in later)
+
+
+class TestNightStart:
+    """Default table flow: night 1 first, the morning announces it, then day 2 discussion."""
+
+    def test_game_opens_at_night_and_day_breaks_with_the_news(self) -> None:
+        table = Table(config=OriginalConfig())
+        assert table.mode.phase.value in ("mafia_chat", "night_actions")
+        assert table.mode.day == 1
+        table.pass_until("night_actions")
+        victim = table.seats_with(Role.CITIZEN)[0]
+        table.answer_all(lambda r: {"target": victim} if r.kind == Kind.MAFIA_KILL else {})
+        death = table.bodies(PlayerDied)[-1]
+        assert (death.seat, death.cause) == (victim, "night")
+        assert (table.mode.day, table.mode.phase.value) == (2, "discussion")
+        assert victim not in table.mode.alive
+        assert all(r.seat != victim for r in table.requests())

@@ -58,7 +58,7 @@ def fake_action(request: SeatRequest, rng: random.Random) -> dict[str, Any]:
 
 
 def play(seed: str, config: OriginalConfig | None = None) -> Table:
-    table = Table(seed, config)
+    table = Table(seed, config or OriginalConfig())  # the real default: night first
     rng = random.Random(f"policy:{seed}")
     for _ in range(MAX_ACTIONS):
         if table.state.core.ended:
@@ -142,7 +142,7 @@ def test_random_games_hold_invariants(batch: int) -> None:
 @pytest.mark.parametrize(
     "config",
     [
-        OriginalConfig(start_with_night=True),
+        OriginalConfig(start_with_night=False),
         OriginalConfig(discussion_rounds=1, mafia_chat_rounds=0),
         OriginalConfig(doctor_self_protect=False, doctor_repeat_protect=True),
         OriginalConfig(reveal_role_on_death=True, max_days=3),

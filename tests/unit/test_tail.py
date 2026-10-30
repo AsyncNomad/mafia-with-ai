@@ -38,7 +38,8 @@ def test_god_view_shows_secrets(tmp_path: Path) -> None:
     out = render(db, View(god=True))
     for marker in ("🎭", "👤", "📝", "(신의 시점)", "(마피아 전용)", "(경찰 전용)", "속마음"):
         assert marker in out, marker
-    assert out.count("1일차 · 낮 토론") == 1
+    assert out.index("1일차 · 밤 · 마피아 대화") < out.index("2일차 · 낮 토론")  # opens at night
+    assert out.count("2일차 · 낮 토론") == 1
 
 
 def test_public_view_hides_secrets(tmp_path: Path) -> None:

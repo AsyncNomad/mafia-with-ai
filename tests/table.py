@@ -19,7 +19,8 @@ NAMES = ("도윤", "민지", "서연", "하람", "준호", "예린", "태오", "
 
 class Table:
     def __init__(self, seed: str = "seed-1", config: OriginalConfig | None = None) -> None:
-        self.rules = OriginalMode(config)
+        # Rule tests were written against a day start; pass a config to test the night start.
+        self.rules = OriginalMode(config or OriginalConfig(start_with_night=False))
         self.engine: Engine[OriginalState] = Engine(self.rules, FixedClock())
         seats = [SeatInfo(seat=i + 1, name=n) for i, n in enumerate(NAMES)]
         step = self.engine.create("game-1", seed, seats, human_seats=[1])

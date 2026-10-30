@@ -21,7 +21,7 @@ from typing import Any, cast
 from mafia.harness.identity import Caller, CallerKind, classify
 from mafia.harness.ports import HarnessState, HumanInputKind, HumanInputOutcome
 from mafia.harness.tools import KNOWN_AGENTS
-from mafia.hosts.claude_code.hooks import policy
+from mafia.hosts.claude_code.hooks import echo, policy
 from mafia.hosts.claude_code.hooks.prompts import PromptKind, classify_prompt
 
 
@@ -54,13 +54,20 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
 
     match event:
         case "PreToolUse":
+            tool_name = _str(payload.get("tool_name"))
             decision = policy.decide_pre_tool_use(
-                caller,
-                _str(payload.get("tool_name")),
-                _mapping(payload.get("tool_input")),
-                ctx.state_factory(),
+                caller, tool_name, _mapping(payload.get("tool_input")), ctx.state_factory()
             )
+            if isinstance(decision, policy.Allow) and _echo_gated(caller, tool_name):
+                missing = echo.unechoed(_str(payload.get("transcript_path")))
+                if missing:
+                    decision = policy.Deny(echo.echo_reason(missing))
             return _pre_tool_use_output(decision)
+        case "Stop":
+            if caller.kind is not CallerKind.MAIN or payload.get("stop_hook_active"):
+                return {}
+            missing = echo.unechoed(_str(payload.get("transcript_path")))
+            return {"decision": "block", "reason": echo.echo_reason(missing)} if missing else {}
         case "PostToolUse":
             return _post_tool_use(caller, payload)
         case "SubagentStart":
@@ -178,6 +185,13 @@ def _post_tool_use(caller: Caller, payload: Mapping[str, Any]) -> dict[str, Any]
     return _sealed_output(
         target if isinstance(target, str) else "subagent", payload.get("tool_response")
     )
+
+
+def _echo_gated(caller: Caller, tool_name: str) -> bool:
+    """Driver actions that must wait until the latest display has been written out."""
+    if caller.kind is not CallerKind.MAIN:
+        return False
+    return tool_name in policy.SPAWN_TOOLS or policy.mcp_short_name(tool_name) in DISPLAY_TOOLS
 
 
 # Driver tools whose <display> the human must read in the chat, verbatim.

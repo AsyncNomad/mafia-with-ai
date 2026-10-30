@@ -42,7 +42,7 @@ DENIED_BUILTINS = (
 )
 
 HOOK_EVENTS_WITH_MATCHER = ("PreToolUse", "PostToolUse")
-HOOK_EVENTS_WITHOUT_MATCHER = ("UserPromptSubmit", "SubagentStart", "SubagentStop")
+HOOK_EVENTS_WITHOUT_MATCHER = ("UserPromptSubmit", "SubagentStart", "SubagentStop", "Stop")
 
 SPIKE_SEATS = (1, 2)
 SEAT_COUNT = 8
