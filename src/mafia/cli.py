@@ -40,6 +40,13 @@ def _spike_reset(_: argparse.Namespace) -> int:
     return 0
 
 
+def _tail(args: argparse.Namespace) -> int:
+    from mafia.tail import View, run
+
+    view = View(god=args.god, seat=args.seat)
+    return run(view, game_id=args.game, follow=not args.once)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mafia")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -48,6 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--spike", action="store_true", help="M0 harness spike workspace")
     setup.add_argument("--mode", choices=("enforce", "observe"), default="enforce")
     setup.set_defaults(func=_setup)
+
+    tail = sub.add_parser("tail", help="follow the game log in this terminal")
+    who = tail.add_mutually_exclusive_group()
+    who.add_argument("--god", action="store_true", help="everything, including secrets (spoilers!)")
+    who.add_argument("--seat", type=int, help="what this seat can see")
+    tail.add_argument("--game", default=None, help="game id (default: the active game)")
+    tail.add_argument("--once", action="store_true", help="print what exists and exit")
+    tail.set_defaults(func=_tail)
 
     report = sub.add_parser("spike-report", help="evaluate M0 harness contracts")
     report.add_argument(

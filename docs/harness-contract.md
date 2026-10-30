@@ -60,7 +60,22 @@
 - **UserPromptSubmit:** `cwd, hook_event_name, permission_mode, prompt, prompt_id, session_id, transcript_path`. 알림인지 구분하는 필드는 **없습니다**. 그래서 프롬프트 본문의 `<task-notification>` 접두어로 판별합니다.
 - **Agent의 동기 응답(`tool_response`):** `status, prompt, agentId, agentType, toolsUsed, harnessNoteCount, harnessTailCount, harnessSectionHash, content[], resolvedModel, totalDurationMs, totalTokens, totalToolUseCount, usage, toolStats, canContinueAgent`
 
-## 3. 남은 검증
+## 3. 실제 게임 E2E (M2)
+
+2026-10-30, `claude -p "/mafia watch"` 헤드리스. 조건은 AI 8명 관전 게임이고, 메인과 좌석 모두 sonnet, 좌석 effort는 medium입니다.
+
+| 항목 | 결과 |
+|---|---|
+| 진행 | 메인 146턴, 약 9분 44초 만에 게임 정상 종료 (마피아 승). API 요금 환산 약 $3.6 |
+| 이벤트 | 384개, `audit` 위반 **0건** |
+| 좌석 행동 | 92개. 대체 행동 0건, 92건에 메모, 91건에 의심도 |
+| 훅 | 836회 호출, 내부 오류 0건, 최대 94ms |
+| 차단 | 메인·좌석의 허용 외 도구 시도 0건. 백그라운드 알림 0건(동기 강제가 동작함). 제출 전 종료 시도 5회는 차단 후 모두 제출 |
+| 봉인 | Agent 결과 87건 모두 `status: completed`로 받아 봉인 |
+
+재현하려면 `uv run mafia setup` 후 `play/`에서 `claude -p "/mafia watch"`를 실행합니다.
+
+## 4. 남은 검증
 
 - [ ] **VSCode 확장에서 같은 계약을 확인하기.** 헤드리스와 같은 바이너리지만 UI 경로는 다를 수 있습니다. 절차:
   1. `uv run mafia spike-reset && uv run mafia setup --spike --mode enforce`
@@ -69,7 +84,7 @@
   4. 응답의 마지막 메시지를 `runs/spike/vscode-main.txt`로 저장한 뒤 `uv run mafia spike-report --main-output runs/spike/vscode-main.txt`를 실행합니다.
 - [ ] **Codex 단계에서 같은 계약을 정의하기.** 훅 의미론이 달라서(§11) 헤드리스 러너로 대응합니다.
 
-## 4. 알려진 한계 (설계상 수용)
+## 5. 알려진 한계 (설계상 수용)
 
 - 사람이 VSCode 에이전트 맵에서 서브에이전트를 직접 열면 내부(`my_turn` 결과)가 보입니다. 서브에이전트 전사본(`~/.claude/projects/.../subagents/`)에도 남습니다. AI 사이의 격리와는 무관한 사람 쪽 스포일러 문제입니다.
 - SubagentStop 차단은 1회만 합니다. 두 번째에도 제출하지 않으면 종료를 허용하고, 엔진이 대체 행동을 적용합니다. 무한 루프보다 낫다고 판단했습니다.

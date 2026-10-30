@@ -142,6 +142,7 @@ mafia-with-ai/
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
+| 상태 (2026-10-30) | M0·M1 완료, M2 완료(CLI 헤드리스 E2E 통과, VSCode 수동 확인 대기), M3 중 `mafia tail` 완료 | |
 | M0 하네스 스파이크 | 빈 엔진, 훅 6개, 좌석 2개 | 아래 §9의 미검증 가정을 VSCode에서 실측하고 `docs/harness-contract.md`에 기록 |
 | M1 오리지널 엔진 | 규칙, 가시성, SQLite, FakeSeat 시뮬레이션 | 수백 판 자동 진행, audit 100% 통과 |
 | M2 오리지널 연결 | MCP 도구, `/mafia`, 좌석 생성기 | 사람 1 + AI 7로 VSCode에서 한 판 완주 |
