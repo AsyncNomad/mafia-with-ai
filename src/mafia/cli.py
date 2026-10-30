@@ -47,6 +47,18 @@ def _tail(args: argparse.Namespace) -> int:
     return run(view, game_id=args.game, follow=not args.once)
 
 
+def _replay(args: argparse.Namespace) -> int:
+    from mafia.tail import View, replay
+
+    return replay(View(god=args.god, seat=args.seat), game_id=args.game, speed=args.speed)
+
+
+def _games(_: argparse.Namespace) -> int:
+    from mafia.tail import list_games
+
+    return list_games()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mafia")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -63,6 +75,17 @@ def build_parser() -> argparse.ArgumentParser:
     tail.add_argument("--game", default=None, help="game id (default: the active game)")
     tail.add_argument("--once", action="store_true", help="print what exists and exit")
     tail.set_defaults(func=_tail)
+
+    rep = sub.add_parser("replay", help="replay a stored game, paced for reading")
+    rep_who = rep.add_mutually_exclusive_group()
+    rep_who.add_argument("--god", action="store_true", help="everything, including secrets")
+    rep_who.add_argument("--seat", type=int, help="what this seat could see")
+    rep.add_argument("--game", default=None, help="game id (default: the active game)")
+    rep.add_argument("--speed", type=float, default=1.0, help="2 = twice as fast, 0 = instant")
+    rep.set_defaults(func=_replay)
+
+    games = sub.add_parser("games", help="list stored games")
+    games.set_defaults(func=_games)
 
     report = sub.add_parser("spike-report", help="evaluate M0 harness contracts")
     report.add_argument(

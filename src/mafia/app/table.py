@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from mafia import paths
 from mafia.app.human_input import HELP_TEXT, Command, parse, resolve_seat
-from mafia.engine.core_events import ContextDelivered, SeatInfo
+from mafia.engine.core_events import ContextDelivered, GameEnded, SeatInfo
 from mafia.engine.events import Event
 from mafia.engine.requests import Action, ActionRejected, Answer, SeatRequest
 from mafia.engine.runtime import Clock, SystemClock, rng_for
@@ -31,6 +31,7 @@ from mafia.store.events import EventStore
 from mafia.store.harness import HarnessStore
 from mafia.views.chat_md import render_events, render_human_request, render_role_card
 from mafia.views.narration import PHASE_LABELS, name_lookup
+from mafia.views.postmortem import render_postmortem
 from mafia.views.seat_text import render_seat_context
 
 SEAT_COUNT = 8
@@ -128,6 +129,10 @@ class TableApp:
 
         if core.ended:
             nxt = Next("ended")
+            if any(e.kind == GameEnded.KIND for e in seen):
+                review = render_postmortem(loaded.log, core.seats, core.mode)
+                if review:
+                    parts.append(review)
             parts.append("**게임이 끝났습니다.** 새 게임은 `/mafia new`")
         else:
             human_request = self._request_for(loaded, human)

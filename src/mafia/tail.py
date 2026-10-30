@@ -6,9 +6,12 @@ Reads the database only; never writes. Safe to run while a game is being played.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from rich.console import Console
+from rich.table import Table
 from rich.text import Text
 
 from mafia import paths
@@ -17,6 +20,7 @@ from mafia.engine.engine import Engine
 from mafia.engine.events import Event
 from mafia.engine.runtime import SystemClock
 from mafia.engine.visibility import Viewer, can_see
+from mafia.modes.original.events import MafiaChat, Speech
 from mafia.modes.registry import build_mode
 from mafia.store.db import connect
 from mafia.store.events import EventStore, GameNotFound
@@ -66,25 +70,19 @@ class Tail:
         state = engine.fold(self.events)
         return engine.mode.viewer(state.mode, state.core, self.view.seat)
 
-    def poll(self, game_id: str | None) -> None:
-        if game_id is None:
-            return
-        if game_id != self.game_id:
-            self.game_id = game_id
-            self.events = []
-            label = (
-                "신의 시점"
-                if self.view.god
-                else f"{self.view.seat}번 좌석 시점"
-                if self.view.seat
-                else "공개 시점"
-            )
-            self.console.rule(f"[bold]게임 {game_id} · {label}[/]")
-        try:
-            record = self.store.game(game_id)
-        except GameNotFound:
-            return
-        new = self.store.load(game_id, after_seq=self.events[-1].seq if self.events else 0)
+    def switch(self, game_id: str) -> None:
+        self.game_id = game_id
+        self.events = []
+        if self.view.god:
+            label = "신의 시점"
+        elif self.view.seat:
+            label = f"{self.view.seat}번 좌석 시점"
+        else:
+            label = "공개 시점"
+        self.console.rule(Text(f"게임 {game_id} · {label}", style="bold"))
+
+    def feed(self, new: Sequence[Event], mode: str) -> None:
+        """Append events to the known log and print those this view may see."""
         if not new:
             return
         self.events.extend(new)
@@ -94,13 +92,73 @@ class Tail:
         for event in new:
             if not can_see(viewer, event.visibility):
                 continue
-            line = narrate_terminal(event, record.mode, names, god=self.view.god)
+            line = narrate_terminal(event, mode, names, god=self.view.god)
             if line is None:
                 continue
             if event.kind == PhaseChanged.KIND:
                 self.console.rule(Text(line.strip("─ "), style="bold cyan"))
             else:
                 self.console.print(colorize(line, seats), highlight=False)
+
+    def poll(self, game_id: str | None) -> None:
+        if game_id is None:
+            return
+        if game_id != self.game_id:
+            self.switch(game_id)
+        try:
+            record = self.store.game(game_id)
+        except GameNotFound:
+            return
+        after = self.events[-1].seq if self.events else 0
+        self.feed(self.store.load(game_id, after_seq=after), record.mode)
+
+
+def pause_for(event: Event) -> float:
+    """Seconds a human needs to read this event at speed 1."""
+    if event.kind in (Speech.KIND, MafiaChat.KIND):
+        text = str(event.data.get("text") or "")
+        return 0.8 + len(text) / 35
+    if event.kind == PhaseChanged.KIND:
+        return 1.5
+    return 0.3
+
+
+def replay(view: View, *, game_id: str | None, speed: float) -> int:
+    """Print a stored game from the start, paced for reading. `speed=0` prints instantly."""
+    store = EventStore(connect(paths.game_db_path()))
+    game_id = game_id or store.active_game()
+    if game_id is None:
+        Console().print("저장된 게임이 없습니다.")
+        return 1
+    record = store.game(game_id)
+    tail = Tail(store, view, Console())
+    tail.switch(game_id)
+    try:
+        for event in store.load(game_id):
+            tail.feed([event], record.mode)
+            if speed > 0 and can_see(tail._viewer(), event.visibility):  # pyright: ignore[reportPrivateUsage]
+                time.sleep(pause_for(event) / speed)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def list_games() -> int:
+    store = EventStore(connect(paths.game_db_path()))
+    active = store.active_game()
+    table = Table("", "게임", "모드", "시작", "이벤트", "상태")
+    for g in store.list_games():
+        started = datetime.fromtimestamp(g.created_at).strftime("%m-%d %H:%M")
+        table.add_row(
+            "▶" if g.game_id == active else "",
+            g.game_id,
+            g.mode,
+            started,
+            str(g.last_seq),
+            "종료" if g.ended else "진행 중",
+        )
+    Console().print(table)
+    return 0
 
 
 def run(view: View, *, game_id: str | None, follow: bool, interval: float = 0.5) -> int:

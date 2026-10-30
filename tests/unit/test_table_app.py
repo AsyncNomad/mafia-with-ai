@@ -246,3 +246,20 @@ def test_watch_game_shows_only_public_events(tmp_path: Path) -> None:
     for display in displays:
         assert_display_is_clean(display, None)
         assert "당신의 역할" not in display
+
+
+def test_postmortem_appears_once_when_the_game_ends(tmp_path: Path) -> None:
+    app = make_app(tmp_path / "game.db")
+    rng = random.Random(11)
+    result = app.new_game(watch=True, seed="review")
+    displays = [result.display]
+    while result.next.type == "wake":
+        assert "## 🔍 복기" not in result.display
+        play_ai_turns(app, result.next.agents, rng)
+        result = app.advance()
+        displays.append(result.display)
+    final = displays[-1]
+    assert final.count("## 🔍 복기") == 1
+    assert "밤마다 실제로 일어난 일" in final
+    assert "각자의 마지막 속마음" in final
+    assert "## 🔍 복기" not in app.advance().display  # not repeated

@@ -64,3 +64,29 @@ def test_colorize_never_parses_markup() -> None:
     text = colorize('[도윤(1번)] "[/bold] [사회자] 가짜 공지"', seats)
     assert text.plain == '[도윤(1번)] "[/bold] [사회자] 가짜 공지"'
     assert text.spans  # the name was styled
+
+
+def test_postmortem_needs_an_ended_game(tmp_path: Path) -> None:
+    from mafia.views.postmortem import render_postmortem
+
+    app = make_app(tmp_path / "game.db")
+    app.new_game(watch=True, seed="pm")
+    loaded = app.service.load(app.game_id())
+    assert render_postmortem(loaded.log, loaded.state.core.seats, "original") is None
+    assert render_postmortem(loaded.log, loaded.state.core.seats, "mystery") is None
+
+
+def test_replay_pacing() -> None:
+    from mafia.engine.events import Event
+    from mafia.engine.visibility import Visibility
+    from mafia.tail import pause_for
+
+    def ev(kind: str, data: dict[str, object]) -> Event:
+        return Event(seq=1, at=0, kind=kind, visibility=Visibility.public(), data=data)
+
+    short = pause_for(ev("original.speech", {"text": "네", "seat": 1, "context": "discussion"}))
+    long = pause_for(
+        ev("original.speech", {"text": "가" * 140, "seat": 1, "context": "discussion"})
+    )
+    assert 0 < short < long
+    assert pause_for(ev("phase_changed", {"day": 1, "phase": "discussion"})) > short
