@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal
@@ -139,6 +139,7 @@ class PrepProgress:
     stage: Stage
     scenario_id: str
     start_game: StartGame | None
+    waiting: bool = False  # agents of this stage are still running (background hosts)
 
 
 def _short(exc: ValidationError) -> list[str]:
@@ -189,21 +190,26 @@ class PrepService:
         return self.store.update_job(job_id, apply, self.clock.now())
 
     # --- driver -------------------------------------------------------------------------
-    def advance(self) -> PrepProgress:
-        progress = self._update(self._step)
+    def advance(self, running: Mapping[str, int] | None = None) -> PrepProgress:
+        """`running`: live runs per agent type. While a stage's agents are still running
+        (hosts that force background subagents), nothing is judged and no wake is spent."""
+        live = dict(running or {})
+        progress = self._update(lambda s: self._step(s, live))
         if progress.stage in (Stage.VERIFIED, Stage.REJECTED):
             found = self.store.active_job()
             if found is not None:
                 self.store.finish_job(found[0])
         return progress
 
-    def _step(self, s: PrepState) -> PrepProgress:
+    def _step(self, s: PrepState, live: Mapping[str, int]) -> PrepProgress:
         for _ in range(16):
             match s.stage:
                 case Stage.DESIGN:
                     if s.checked:
                         s.stage, s.wakes = Stage.AUDIT, 0
                         continue
+                    if live.get(ARCHITECT, 0):
+                        return self._waiting(s, "🖋 설계자가 작업 중입니다")
                     if s.wakes >= MAX_WAKES_PER_STAGE:
                         self._fail(s, ["설계자가 검증을 통과하는 시나리오를 완성하지 못했습니다"])
                         continue
@@ -218,6 +224,8 @@ class PrepService:
                         s.stage, s.wakes = Stage.SOLVE, 0
                         s.solvers = self._new_solver_jobs(s)
                         continue
+                    if live.get(AUDITOR, 0):
+                        return self._waiting(s, "🔎 감수자가 작업 중입니다")
                     if s.wakes >= MAX_WAKES_PER_STAGE:
                         self._fail(s, ["감수 보고서를 받지 못했습니다"])
                         continue
@@ -226,6 +234,8 @@ class PrepService:
                         s, "🔎 감수자가 시나리오의 허점을 찾고 있습니다", (AUDITOR,)
                     )
                 case Stage.SOLVE:
+                    if live.get(SOLVER, 0) or live.get(QUICK_SOLVER, 0):
+                        return self._waiting(s, "🕵 탐정들이 사건을 푸는 중입니다")
                     for job in s.solvers:
                         if job.claimed and job.solution is None:
                             job.claimed = False  # the solver gave up; free the job
@@ -256,6 +266,10 @@ class PrepService:
     @staticmethod
     def _progress(s: PrepState, display: str, agents: tuple[str, ...]) -> PrepProgress:
         return PrepProgress(display, agents, s.stage, s.scenario_id, s.start_game)
+
+    @staticmethod
+    def _waiting(s: PrepState, display: str) -> PrepProgress:
+        return PrepProgress(display, (), s.stage, s.scenario_id, s.start_game, waiting=True)
 
     def _new_solver_jobs(self, s: PrepState) -> list[SolverJob]:
         plan = [
@@ -340,19 +354,23 @@ class PrepService:
             "failures": failures,
         }
 
-    def is_awaiting(self, agent_type: str) -> bool:
+    def wanted_runs(self, agent_type: str) -> int:
+        """How many concurrent runs of this agent the current stage can use."""
         s = self.active()
         if s is None:
-            return False
+            return 0
         match s.stage:
             case Stage.DESIGN:
-                return agent_type == ARCHITECT and not s.checked
+                return int(agent_type == ARCHITECT and not s.checked)
             case Stage.AUDIT:
-                return agent_type == AUDITOR and s.audit is None
+                return int(agent_type == AUDITOR and s.audit is None)
             case Stage.SOLVE:
-                return any(j.agent == agent_type and j.solution is None for j in s.solvers)
+                return sum(1 for j in s.solvers if j.agent == agent_type and j.solution is None)
             case _:
-                return False
+                return 0
+
+    def is_awaiting(self, agent_type: str) -> bool:
+        return self.wanted_runs(agent_type) > 0
 
     # --- architect tools ----------------------------------------------------------------
     def architect_brief(self, caller: str) -> str:

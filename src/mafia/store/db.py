@@ -67,6 +67,15 @@ MIGRATIONS: Sequence[str] = (
         updated_at REAL NOT NULL
     );
     """,
+    # 4: live subagent runs (hosts such as the VSCode extension always run them in the background)
+    """
+    CREATE TABLE agent_live (
+        agent_id    TEXT PRIMARY KEY,
+        agent_type  TEXT NOT NULL,
+        started_at  REAL NOT NULL,
+        finished_at REAL
+    );
+    """,
 )
 
 

@@ -63,7 +63,13 @@ class SpikeState:
         self._conn.execute("INSERT INTO human_inputs (text, at) VALUES (?, ?)", (text, time.time()))
         return HumanInputOutcome(HumanInputKind.PASSTHROUGH)
 
-    def record_agent_finished(self, agent_type: str) -> None:
+    def needs_submission(self, agent_type: str) -> bool:
+        return self.is_awaiting(agent_type)
+
+    def record_agent_started(self, agent_id: str, agent_type: str) -> None:
+        return None
+
+    def record_agent_finished(self, agent_id: str, agent_type: str) -> None:
         return None
 
     # --- spike engine -------------------------------------------------------------------

@@ -21,12 +21,20 @@ class HumanInputOutcome:
 
 
 class HarnessState(Protocol):
-    def is_awaiting(self, agent_type: str) -> bool:
-        """True while the game has an open, unfulfilled request for this agent to act."""
+    def needs_submission(self, agent_type: str) -> bool:
+        """True while the game has an open, unfulfilled request for this agent."""
         ...
 
-    def record_agent_finished(self, agent_type: str) -> None:
-        """The agent's run ended. If it did not submit, the game applies its fallback later."""
+    def is_awaiting(self, agent_type: str) -> bool:
+        """True when the agent should be woken now: it has work and no run is in progress."""
+        ...
+
+    def record_agent_started(self, agent_id: str, agent_type: str) -> None:
+        """A run of this agent began (hosts may run subagents in the background)."""
+        ...
+
+    def record_agent_finished(self, agent_id: str, agent_type: str) -> None:
+        """The run ended. If it did not submit, the game applies its fallback later."""
         ...
 
     def handle_human_input(self, text: str) -> HumanInputOutcome:

@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
-import functools
+import contextlib
+import threading
+import traceback
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+from mafia import paths
 from mafia.app.table import NoActiveGame, TableApp
 from mafia.engine.requests import Answer
 from mafia.harness.tools import MCP_SERVER_NAME
@@ -19,9 +23,23 @@ server = MCPServer(
 )
 
 
-@functools.cache
+# The SDK runs synchronous tools on a pool of worker threads, and a sqlite3 connection may only
+# be used by the thread that created it. Each worker thread therefore gets its own table (and
+# connection); concurrent writers are serialised by the database (see mafia.service).
+_local = threading.local()
+_generation = 0
+
+
 def app() -> TableApp:
-    return TableApp.open_default()
+    if getattr(_local, "generation", None) != _generation:
+        _local.app = TableApp.open_default()
+        _local.generation = _generation
+    return _local.app
+
+
+def reset_for_tests() -> None:
+    global _generation
+    _generation += 1
 
 
 def _guard(fn: Callable[[], str]) -> str:
@@ -29,6 +47,14 @@ def _guard(fn: Callable[[], str]) -> str:
         return fn()
     except (NoActiveGame, PermissionError, LookupError) as exc:
         return str(exc)
+    except Exception as exc:
+        # Never let the SDK swallow a failure into a bare "Error executing tool".
+        log = paths.logs_dir() / "mcp-server.log"
+        with contextlib.suppress(OSError):
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with log.open("a", encoding="utf-8") as f:
+                f.write(f"--- {datetime.now(UTC).isoformat()}\n{traceback.format_exc()}\n")
+        return f"엔진 오류: {exc!r}. 자세한 내용은 runs/logs/mcp-server.log에 기록했습니다. `/mafia continue`로 다시 시도하세요."
 
 
 # --- driver -------------------------------------------------------------------------------
@@ -37,7 +63,7 @@ def new_game(human_name: str = "나", watch: bool = False, mode: str = "original
     """새 게임을 시작한다. mode: "original"(마피아) 또는 "mystery"(머더 미스터리).
     human_name: 사람 플레이어 이름. watch=true면 AI 8명끼리 하는 관전 모드.
     결과의 <display>는 그대로 출력하고 <next>에 따라 진행한다."""
-    return app().new_game(mode=mode, human_name=human_name, watch=watch).to_text()
+    return _guard(lambda: app().new_game(mode=mode, human_name=human_name, watch=watch).to_text())
 
 
 @server.tool()
@@ -49,7 +75,7 @@ def advance() -> str:
 @server.tool()
 def status() -> str:
     """현재 일차, 단계, 생존자(공개 정보)."""
-    return _guard(app().status)
+    return _guard(lambda: app().status())
 
 
 @server.tool()

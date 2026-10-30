@@ -46,6 +46,8 @@ from mafia.views.postmortem import render_postmortem
 from mafia.views.seat_text import render_seat_context
 
 SEAT_COUNT = 8
+# A background run with no stop event after this long is presumed dead (host closed mid-run).
+RUN_STALE_AFTER_SECONDS = 30 * 60
 PUBLIC_VIEWER = "public"
 _LOG_LINES = 25
 
@@ -56,7 +58,8 @@ class NoActiveGame(LookupError):
 
 @dataclass(frozen=True, slots=True)
 class Next:
-    type: Literal["wake", "human", "ended"]
+    # wait: agents are still running in the background; end the turn and resume on notice
+    type: Literal["wake", "human", "ended", "wait"]
     agents: tuple[str, ...] = ()
     parallel: bool = False
 
@@ -130,12 +133,17 @@ class TableApp:
         self, request: str = "", start_game: StartGame | None = None
     ) -> AdvanceResult:
         self.prep().start(request, start_game)
-        return self.advance()
+        preparing = self._advance_preparation()
+        assert preparing is not None
+        return preparing
 
     def _advance_preparation(self) -> AdvanceResult | None:
         if self.preparation is None or self.preparation.active() is None:
             return None
-        progress = self.preparation.advance()
+        live = {a: self._running(a) for a in KNOWN_AGENTS}
+        progress = self.preparation.advance(live)
+        if progress.waiting:
+            return AdvanceResult(progress.display, Next("wait"))
         if progress.agents:
             return AdvanceResult(
                 progress.display, Next("wake", progress.agents, parallel=len(progress.agents) > 1)
@@ -186,10 +194,16 @@ class TableApp:
         )
         return self.advance()
 
+    def _game_in_progress(self) -> bool:
+        game_id = self.service.store.active_game()
+        return game_id is not None and not self.service.load(game_id).state.core.ended
+
     def advance(self) -> AdvanceResult:
-        preparing = self._advance_preparation()
-        if preparing is not None:
-            return preparing
+        # A game in progress always comes first; preparation runs only between games.
+        if not self._game_in_progress():
+            preparing = self._advance_preparation()
+            if preparing is not None:
+                return preparing
         game_id = self.game_id()
         self.service.advance(game_id)
         self._expire_abandoned(game_id)
@@ -221,11 +235,13 @@ class TableApp:
                 parts.append(render_human_request(human_request, core.seats))
                 nxt = Next("human")
             else:
-                agents = tuple(
+                pending = [
                     f"seat-{r.seat}"
                     for r in sorted(core.open_requests.values(), key=lambda r: r.seat)
-                )
-                nxt = Next("wake", agents, parallel=len(agents) > 1)
+                ]
+                agents = tuple(a for a in pending if self._running(a) == 0)
+                # No agents to wake: every pending seat is already running in the background.
+                nxt = Next("wake", agents, parallel=len(agents) > 1) if agents else Next("wait")
         return AdvanceResult("\n\n".join(p for p in parts if p).strip(), nxt)
 
     def status(self) -> str:
@@ -284,21 +300,39 @@ class TableApp:
         return "접수되었습니다. 최종 응답으로 '제출 완료'라고만 쓰고 끝내세요."
 
     # --- HarnessState (hooks) -----------------------------------------------------------
-    def is_awaiting(self, agent_type: str) -> bool:
+    def _running(self, agent_type: str) -> int:
+        return self.harness.running(agent_type, self.clock.now(), RUN_STALE_AFTER_SECONDS)
+
+    def _wanted_runs(self, agent_type: str) -> int:
         caller = classify(agent_type, KNOWN_AGENTS)
         if caller.kind is CallerKind.AGENT:
-            return self.preparation is not None and self.preparation.is_awaiting(agent_type)
+            return 0 if self.preparation is None else self.preparation.wanted_runs(agent_type)
         if caller.kind is not CallerKind.SEAT or caller.seat is None:
-            return False
+            return 0
         try:
             loaded = self.service.load(self.game_id())
         except NoActiveGame:
-            return False
+            return 0
         if caller.seat in loaded.state.core.human_seats:
-            return False
-        return self._request_for(loaded, caller.seat) is not None
+            return 0
+        return int(self._request_for(loaded, caller.seat) is not None)
 
-    def record_agent_finished(self, agent_type: str) -> None:
+    def needs_submission(self, agent_type: str) -> bool:
+        return self._wanted_runs(agent_type) > 0
+
+    def is_awaiting(self, agent_type: str) -> bool:
+        # Parallel spawns of one type (solvers) may start before all spawn checks ran, so the
+        # rule is "fewer runs in progress than the stage can use", not "none in progress".
+        return self._running(agent_type) < self._wanted_runs(agent_type)
+
+    def record_agent_started(self, agent_id: str, agent_type: str) -> None:
+        self.harness.agent_started(
+            agent_id or f"anon-{agent_type}-{self.clock.now()}", agent_type, self.clock.now()
+        )
+
+    def record_agent_finished(self, agent_id: str, agent_type: str) -> None:
+        if agent_id:
+            self.harness.agent_stopped(agent_id, self.clock.now())
         caller = classify(agent_type, KNOWN_AGENTS)
         if caller.kind is not CallerKind.SEAT or caller.seat is None:
             return

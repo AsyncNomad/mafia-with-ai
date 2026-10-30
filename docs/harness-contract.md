@@ -75,7 +75,30 @@
 
 재현하려면 `uv run mafia setup` 후 `play/`에서 `claude -p "/mafia watch"`를 실행합니다.
 
-## 4. 남은 검증
+## 4. VSCode 확장에서 발견한 차이 (2026-10-30, 사용자 첫 플레이)
+
+### 함정 5. VSCode의 Agent는 항상 백그라운드로 실행된다
+- 생성 훅이 `updatedInput`에 `run_in_background: false`를 넣어도 `tool_response.status`가 `async_launched`로 돌아왔다. CLI 헤드리스에서는 지켜졌다.
+- VSCode의 Agent 도구 스키마에는 이 인자가 아예 없는 것으로 보인다.
+- 격리는 유지됐다. 결과가 `<task-notification>`으로 들어왔고, UserPromptSubmit에서 차단됐다(함정 1의 2차 방어선).
+- 하지만 진행이 꼬였다. 진행자가 에이전트가 끝나기 전에 `advance`를 부르고, 결과 알림을 막으니 진행자가 다시 깨어날 방법도 없었다.
+- **대응 (호스트와 무관하게 동작):**
+  1. SubagentStart/SubagentStop 훅이 `agent_id`별 실행 중 여부를 `agent_live`에 기록한다. 30분이 지나면 죽은 실행으로 본다.
+  2. 실행 중인 에이전트는 다시 깨우지 않는다. 생성 허용 기준은 "실행 중 수 < 단계가 쓸 수 있는 수"다. 솔버는 남은 작업 수만큼 병렬 생성을 허용한다.
+  3. 기다릴 에이전트가 모두 실행 중이면 `advance`가 `next.type = "wait"`을 돌려준다. 진행자는 도구를 부르지 않고 턴을 끝낸다. 준비 파이프라인도 그 단계의 에이전트가 실행 중이면 판정을 미루고 깨우기 횟수를 쓰지 않는다.
+  4. 완료 알림은 `<result>`가 정확히 "제출 완료"(또는 빈 값)일 때만 통과시키고, 진행자에게 `advance`를 부르라는 맥락을 붙인다. 그 밖의 결과는 계속 차단한다.
+  5. 제출을 마친 에이전트가 다른 말로 끝내려 하면 SubagentStop이 한 번 막는다("최종 응답은 '제출 완료' 한 마디만").
+
+### 함정 6. MCP SDK는 동기 도구를 스레드 풀에서 실행한다
+- `mcp` 2.x의 `MCPServer`는 동기 함수를 `anyio.to_thread.run_sync`로 돌린다. 서버가 캐시해 둔 sqlite3 연결이 다른 작업 스레드에서 쓰이는 순간 `ProgrammingError`가 난다. 그 뒤로는 모든 도구가 0초 만에 실패했다.
+- SDK가 예외를 "Error executing tool"로만 바꿔서 원인이 보이지 않았다.
+- 헤드리스 E2E에서는 우연히 같은 스레드만 걸려 드러나지 않았다.
+- **대응:** 작업 스레드마다 `TableApp`(연결)을 하나씩 둔다. 예상하지 못한 예외는 트레이스백을 `runs/logs/mcp-server.log`에 남기고, 읽을 수 있는 "엔진 오류" 메시지로 돌려준다.
+- **회귀 테스트** (`tests/unit/test_mcp_server.py`):
+  - 연결을 만든 스레드가 살아 있는 동안 다른 스레드에서 호출하는 경우. 순차 스레드는 스레드 ID가 재사용돼 재현되지 않는다.
+  - 모든 도구 본문이 가드를 거치는지 검사
+
+## 5. 남은 검증
 
 - [ ] **VSCode 확장에서 같은 계약을 확인하기.** 헤드리스와 같은 바이너리지만 UI 경로는 다를 수 있습니다. 절차:
   1. `uv run mafia spike-reset && uv run mafia setup --spike --mode enforce`
@@ -84,7 +107,7 @@
   4. 응답의 마지막 메시지를 `runs/spike/vscode-main.txt`로 저장한 뒤 `uv run mafia spike-report --main-output runs/spike/vscode-main.txt`를 실행합니다.
 - [ ] **Codex 단계에서 같은 계약을 정의하기.** 훅 의미론이 달라서(§11) 헤드리스 러너로 대응합니다.
 
-## 5. 알려진 한계 (설계상 수용)
+## 6. 알려진 한계 (설계상 수용)
 
 - 사람이 VSCode 에이전트 맵에서 서브에이전트를 직접 열면 내부(`my_turn` 결과)가 보입니다. 서브에이전트 전사본(`~/.claude/projects/.../subagents/`)에도 남습니다. AI 사이의 격리와는 무관한 사람 쪽 스포일러 문제입니다.
 - SubagentStop 차단은 1회만 합니다. 두 번째에도 제출하지 않으면 종료를 허용하고, 엔진이 대체 행동을 적용합니다. 무한 루프보다 낫다고 판단했습니다.

@@ -24,7 +24,15 @@ class FakeState:
         self.human_inputs.append(text)
         return self.outcome
 
-    def record_agent_finished(self, agent_type: str) -> None:
+    started: list[str] = field(default_factory=list[str])
+
+    def needs_submission(self, agent_type: str) -> bool:
+        return agent_type in self.awaiting
+
+    def record_agent_started(self, agent_id: str, agent_type: str) -> None:
+        self.started.append(agent_type)
+
+    def record_agent_finished(self, agent_id: str, agent_type: str) -> None:
         self.finished.append(agent_type)
 
 

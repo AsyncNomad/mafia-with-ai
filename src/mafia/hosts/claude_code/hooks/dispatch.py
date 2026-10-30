@@ -61,19 +61,30 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
             return _pre_tool_use_output(decision)
         case "PostToolUse":
             return _post_tool_use(caller, payload)
+        case "SubagentStart":
+            if caller.kind in (CallerKind.SEAT, CallerKind.AGENT) and caller.agent_type:
+                ctx.state_factory().record_agent_started(
+                    _str(payload.get("agent_id")), caller.agent_type
+                )
+            return {}
         case "SubagentStop":
             state = ctx.state_factory()
             reason = policy.decide_subagent_stop(
-                caller, bool(payload.get("stop_hook_active")), state
+                caller,
+                bool(payload.get("stop_hook_active")),
+                state,
+                _str(payload.get("last_assistant_message")),
             )
             if reason:
                 return {"decision": "block", "reason": reason}
             if caller.kind in (CallerKind.SEAT, CallerKind.AGENT) and caller.agent_type:
-                state.record_agent_finished(caller.agent_type)
+                state.record_agent_finished(_str(payload.get("agent_id")), caller.agent_type)
             return {}
         case "UserPromptSubmit":
             prompt = _str(payload.get("prompt"))
             if policy.is_task_notification(prompt):
+                if policy.notification_is_sealed(prompt):
+                    return _sealed_notification()
                 return _blocked_notification()
             if caller.kind is not CallerKind.MAIN:
                 return {}
@@ -96,6 +107,16 @@ def _human_input_output(outcome: HumanInputOutcome) -> dict[str, Any]:
             return {"decision": "block", "reason": outcome.message}
         case HumanInputKind.PASSTHROUGH:
             return {}
+
+
+def _sealed_notification() -> dict[str, Any]:
+    """Let a sealed completion notice wake the driver (hosts that force background agents)."""
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": "에이전트 차례가 끝났습니다. 이 알림에 답하지 말고 곧바로 mcp__mafia__advance를 호출해 진행하세요.",
+        }
+    }
 
 
 def _blocked_notification() -> dict[str, Any]:

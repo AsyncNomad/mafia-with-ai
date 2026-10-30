@@ -135,7 +135,8 @@ class TestSeats:
         result = app.new_game(watch=True, seed="abandon")
         agent = result.next.agents[0]
         assert app.is_awaiting(agent)
-        app.record_agent_finished(agent)  # the subagent stopped without submitting
+        app.record_agent_started("a1", agent)
+        app.record_agent_finished("a1", agent)  # the subagent stopped without submitting
         app.advance()
         loaded = app.service.load(app.game_id())
         fallbacks = [
@@ -285,3 +286,54 @@ def test_preparation_takes_over_advance_until_done(tmp_path: Path) -> None:
     assert not app.is_awaiting("mystery-auditor")
     assert not app.is_awaiting("seat-1")  # no game is running
     assert app.advance().next.agents == ("mystery-architect",)  # still designing
+
+
+class TestBackgroundAgents:
+    """VSCode runs subagents in the background: the driver may call advance while they run."""
+
+    def test_running_seat_is_not_woken_twice(self, app: TableApp) -> None:
+        result = app.new_game(watch=True, seed="bg")
+        agent = result.next.agents[0]
+        app.record_agent_started("run-1", agent)
+        assert not app.is_awaiting(agent)  # a duplicate spawn would be denied
+        assert app.needs_submission(agent)  # but it still owes an answer
+        again = app.advance()
+        assert again.next.type == "wait"
+
+    def test_finished_run_without_submission_falls_back(self, app: TableApp) -> None:
+        result = app.new_game(watch=True, seed="bg2")
+        agent = result.next.agents[0]
+        app.record_agent_started("run-1", agent)
+        app.record_agent_finished("run-1", agent)
+        nxt = app.advance()
+        assert nxt.next.type in ("wake", "human")
+        assert agent not in nxt.next.agents or nxt.next.agents.count(agent) == 1
+
+    def test_stale_runs_are_ignored(self, tmp_path: Path) -> None:
+        app = make_app(tmp_path / "g.db")
+        result = app.new_game(watch=True, seed="stale")
+        agent = result.next.agents[0]
+        app.record_agent_started("ghost", agent)
+        assert not app.is_awaiting(agent)
+        app.clock = FixedClock(start=10_000_000)  # far in the future: the run is presumed dead
+        assert app.is_awaiting(agent)
+
+
+def test_game_in_progress_takes_priority_over_preparation(tmp_path: Path) -> None:
+    from mafia.app.prep import PrepService
+    from mafia.store.scenarios import ScenarioStore
+
+    conn = connect(tmp_path / "game.db")
+    clock = FixedClock()
+    app = TableApp(
+        GameService(EventStore(conn), clock),
+        HarnessStore(conn),
+        clock,
+        load_personas(),
+        preparation=PrepService(ScenarioStore(conn), clock),
+    )
+    prepared = app.prepare_mystery("남극 기지")
+    assert prepared.next.agents == ("mystery-architect",)
+    game = app.new_game(watch=True, seed="priority")
+    assert all(a.startswith("seat-") for a in game.next.agents)  # the game, not the architect
+    assert all(a.startswith("seat-") for a in app.advance().next.agents)

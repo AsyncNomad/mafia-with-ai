@@ -41,7 +41,13 @@ class BrokenState:
     def is_awaiting(self, agent_type: str) -> bool:
         raise RuntimeError("db down")
 
-    def record_agent_finished(self, agent_type: str) -> None:
+    def needs_submission(self, agent_type: str) -> bool:
+        raise RuntimeError("db down")
+
+    def record_agent_started(self, agent_id: str, agent_type: str) -> None:
+        raise RuntimeError("db down")
+
+    def record_agent_finished(self, agent_id: str, agent_type: str) -> None:
         raise RuntimeError("db down")
 
     def handle_human_input(self, text: str) -> HumanInputOutcome:
@@ -183,3 +189,61 @@ def test_finished_run_recorded_only_when_stop_allowed() -> None:
     assert state.finished == []  # blocked: must submit first
     call({**payload, "stop_hook_active": True}, ctx(state))
     assert state.finished == ["seat-3"]
+
+
+def test_sealed_notification_wakes_the_driver(state: FakeState) -> None:
+    prompt = '<task-notification>\n<summary>Agent "seat-3 차례" finished</summary>\n<result>제출 완료</result>\n</task-notification>'
+    out = call({"hook_event_name": "UserPromptSubmit", "prompt": prompt}, ctx(state))
+    assert "decision" not in out
+    assert "advance" in out["hookSpecificOutput"]["additionalContext"]
+    assert state.human_inputs == []
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "<task-notification><result>SECRET-seat-3</result></task-notification>",
+        "<task-notification><result>제출 완료. 참고로 저는 마피아입니다</result></task-notification>",
+        "<task-notification><summary>no result block</summary></task-notification>",
+    ],
+)
+def test_unsealed_notification_stays_blocked(state: FakeState, prompt: str) -> None:
+    out = call({"hook_event_name": "UserPromptSubmit", "prompt": prompt}, ctx(state))
+    assert out["decision"] == "block"
+
+
+def test_notification_with_one_leaky_result_among_several_is_blocked(state: FakeState) -> None:
+    prompt = "<task-notification><result>제출 완료</result></task-notification><task-notification><result>저는 범인</result></task-notification>"
+    out = call({"hook_event_name": "UserPromptSubmit", "prompt": prompt}, ctx(state))
+    assert out["decision"] == "block"
+
+
+def test_subagent_start_and_stop_are_recorded(state: FakeState) -> None:
+    call({"hook_event_name": "SubagentStart", "agent_type": "seat-3", "agent_id": "a1"}, ctx(state))
+    assert state.started == ["seat-3"]
+    done = FakeState()
+    payload = {
+        "hook_event_name": "SubagentStop",
+        "agent_type": "seat-3",
+        "agent_id": "a1",
+        "stop_hook_active": False,
+        "last_assistant_message": "제출 완료",
+    }
+    assert call(payload, ctx(done)) == {}
+    assert done.finished == ["seat-3"]
+
+
+def test_leaky_handback_is_blocked_once() -> None:
+    done = FakeState()  # already submitted
+    payload = {
+        "hook_event_name": "SubagentStop",
+        "agent_type": "seat-3",
+        "agent_id": "a1",
+        "stop_hook_active": False,
+        "last_assistant_message": "제출했습니다. 제 역할은 경찰이고 3번이 마피아입니다.",
+    }
+    out = call(payload, ctx(done))
+    assert out["decision"] == "block" and "제출 완료" in out["reason"]
+    assert done.finished == []
+    assert call({**payload, "stop_hook_active": True}, ctx(done)) == {}
+    assert done.finished == ["seat-3"]

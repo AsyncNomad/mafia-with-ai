@@ -6,6 +6,7 @@ in `__main__` turns these decisions into Claude Code's hook output format.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, cast
@@ -158,16 +159,37 @@ def is_task_notification(prompt: str) -> bool:
     return prompt.lstrip().startswith(TASK_NOTIFICATION_TAG)
 
 
-def decide_subagent_stop(caller: Caller, stop_hook_active: bool, state: HarnessState) -> str | None:
-    """Return a block reason if the agent tries to stop before fulfilling its request.
+HANDBACK = "제출 완료"
+_ALLOWED_HANDBACKS = frozenset({"", HANDBACK, HANDBACK + "."})
+_RESULT_RE = re.compile(r"<result>(.*?)</result>", re.DOTALL)
 
-    Blocks at most once: if the agent already got a block and still did not submit, it is
-    allowed to stop and the engine applies its fallback action. Looping forever is worse.
+
+def is_sealed_handback(text: str) -> bool:
+    return text.strip() in _ALLOWED_HANDBACKS
+
+
+def decide_subagent_stop(
+    caller: Caller, stop_hook_active: bool, state: HarnessState, last_message: str = ""
+) -> str | None:
+    """Return a block reason if the agent tries to stop too early or with a leaky handback.
+
+    Blocks at most once per stop attempt chain: if the agent was already blocked and still did
+    not comply, it may stop. The engine then applies its fallback, and a non-sealed result is
+    kept from the driver by `notification_is_sealed`. Looping forever is worse.
     """
     if caller.kind not in (CallerKind.SEAT, CallerKind.AGENT) or caller.agent_type is None:
         return None
     if stop_hook_active:
         return None
-    if state.is_awaiting(caller.agent_type):
+    if state.needs_submission(caller.agent_type):
         return "아직 행동을 제출하지 않았습니다. 지침에서 요구한 제출 도구를 호출한 뒤 끝내세요."
+    if not is_sealed_handback(last_message):
+        return f"제출은 끝났습니다. 최종 응답은 '{HANDBACK}' 한 마디만 쓰세요. 다른 내용은 쓰지 마세요."
     return None
+
+
+def notification_is_sealed(prompt: str) -> bool:
+    """A background-agent completion notice may reach the driver only if its result is the
+    fixed handback. Anything else could carry a seat's secrets and stays blocked."""
+    results = _RESULT_RE.findall(prompt)
+    return bool(results) and all(is_sealed_handback(r) for r in results)

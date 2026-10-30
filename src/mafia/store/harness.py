@@ -34,3 +34,26 @@ class HarnessStore:
             "ON CONFLICT (game_id, viewer) DO UPDATE SET last_seq = excluded.last_seq",
             (game_id, viewer, last_seq),
         )
+
+    # --- live runs ----------------------------------------------------------------------
+    def agent_started(self, agent_id: str, agent_type: str, at: float) -> None:
+        self._conn.execute(
+            "INSERT OR IGNORE INTO agent_live (agent_id, agent_type, started_at) VALUES (?, ?, ?)",
+            (agent_id, agent_type, at),
+        )
+
+    def agent_stopped(self, agent_id: str, at: float) -> None:
+        self._conn.execute(
+            "UPDATE agent_live SET finished_at = ? WHERE agent_id = ? AND finished_at IS NULL",
+            (at, agent_id),
+        )
+
+    def running(self, agent_type: str, now: float, stale_after: float) -> int:
+        """Runs of this agent type that started and have not stopped. Runs older than
+        `stale_after` seconds are presumed dead (e.g. the host was closed mid-run)."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM agent_live WHERE agent_type = ? AND finished_at IS NULL "
+            "AND started_at > ?",
+            (agent_type, now - stale_after),
+        ).fetchone()
+        return int(row[0])
