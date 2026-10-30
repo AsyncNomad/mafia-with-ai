@@ -110,18 +110,14 @@ mafia-with-ai/
 │   │   └── templates/            #   seat.md.j2, settings.json.j2, SKILL.md.j2
 │   ├── setup/                    # config → play/ 워크스페이스 생성(gen), 환경 진단(doctor)
 │   └── cli.py                    # typer: setup / tail / replay / audit / scenarios / reset
-├── play/                         # ★ 테이블: VSCode로 이 폴더를 연다
+│   ├── prompts/agents/           # 에이전트 프롬프트 정본 (호스트 중립 md, D12)
+├── play/                         # ★ 테이블: VSCode로 이 폴더를 연다. 전부 `mafia setup` 생성물, gitignore
 │   ├── CLAUDE.md                 # "너는 진행 드라이버다"
 │   ├── .mcp.json
 │   └── .claude/
 │       ├── settings.json         # 권한 잠금 + 훅 등록
 │       ├── skills/mafia/SKILL.md
-│       └── agents/
-│           ├── seat-1.md … seat-8.md      # 생성물, 직접 수정 금지
-│           ├── mystery-architect.md
-│           ├── mystery-auditor.md
-│           ├── mystery-solver.md
-│           └── mystery-narrator.md
+│       └── agents/               # seat-1…8, mystery-architect/auditor/solver/narrator
 ├── runs/                         # gitignore, play/ 바깥
 │   ├── games/<id>/game.db
 │   └── scenarios/<id>/           # 검증 통과한 시나리오 라이브러리
@@ -167,6 +163,8 @@ mafia-with-ai/
 | D8 | 사람 입력 명령은 `:` 접두어 | `/`는 Claude Code 명령, `@`는 파일 멘션과 충돌 |
 | D9 | 시나리오 품질은 프롬프트 수사가 아니라 구조로 보증 (스키마 → 코드 검증 → 적대적 감수 → 블라인드 풀이 → 수정 루프) | "세계 최고 수준의 기획자" 같은 역할 문장에 기대기: 현재 모델에서는 효과가 작음. 맥락·이유·검증이 품질을 만든다 |
 | D10 | AI 실행 방식을 SeatRunner 포트로 분리. 기본은 `claude_subagent` | 훅 기반 강제를 엔진에 직접 묶기: Codex 등 다른 호스트로 옮길 수 없게 됨 (§11) |
+| D11 | 지원 범위: Claude Code 우선, 다음 단계로 Codex. 로컬 LLM과 기타 모델 API는 범위 밖 (§11 향후 확장) | 처음부터 모델 무관 엔진 주도 구조(ModelProvider)로 가기: 검토 결과 격리·이식성은 더 좋지만, 사용자가 서브에이전트 기반 원안을 택함 (2026-10-30) |
+| D12 | 에이전트 프롬프트 정본은 호스트 중립 md(`src/mafia/prompts/`). 호스트별 파일(`play/.claude/agents/*.md`의 frontmatter 등)은 `mafia setup`이 생성 | 호스트별 파일을 직접 관리: 호스트가 늘면 프롬프트가 갈라지고, 기계별 절대 경로가 리포에 들어감 |
 
 ## 9. 미검증 가정 (M0에서 실측)
 
@@ -264,6 +262,17 @@ adapters: mcp_server · hosts/<host> · runners · cli
 `headless`에서는 채팅 호스트가 공개 도구(`advance` 등)만 부르면 된다. 따라서 메인 채팅도 MCP를 지원하는 어떤 에이전트든 될 수 있다. 대가는 다음과 같다.
 - AI 차례가 MCP 도구 호출 안에서 오래 돌기 때문에, 엔진 워커를 백그라운드로 두고 `advance(wait)`로 폴링하는 구조가 필요하다.
 - 각 CLI의 비대화형 모드에서 도구 제한·MCP 설정 고정 옵션을 따로 검증해야 한다.
+
+### 향후 확장 후보 (현재 범위 밖, D11)
+로컬 LLM(Ollama, llama.cpp, vLLM 등)과 기타 모델 API는 고려하지 않는다. 나중에 추가한다면 엔진이 좌석 컨텍스트로 모델을 직접 호출하는 `ModelProvider` 러너가 자연스러운 경로다. 2026-10-30에 검토한 쟁점:
+
+- 등급별 프롬프트 오버레이
+- 구조화 출력 제약(문법/JSON 모드)과 재시도
+- 좌석별 기억 압축 (소형 모델은 실질 8K 컨텍스트)
+- 역할 누설 후검사
+- 모델별 평가 하네스
+
+시나리오 생성은 강한 모델이 필요하다. 다만 완성된 시나리오 JSON은 모델과 무관한 데이터라 공유할 수 있다.
 
 ### 참고: superpowers가 어디서나 붙는 이유
 superpowers는 **지시문(스킬 마크다운)**이라서, 호스트별 도구 이름 대응표(`references/codex-tools.md` 등)만 두면 옮겨진다. 강제력은 없다. 이 프로젝트의 격리는 **강제**가 핵심이라 호스트의 훅 의미론에 의존하고, 그래서 이식에 어댑터가 필요하다. 지시문 층(에이전트 프롬프트 본문, `/mafia` 진행 프로토콜)은 superpowers처럼 공유하고, 강제 층만 호스트별로 둔다.
