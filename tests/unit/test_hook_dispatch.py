@@ -76,7 +76,9 @@ def test_post_tool_use_seals_spawn_result(state: FakeState) -> None:
         "tool_response": {"content": [{"type": "text", "text": "SECRET"}]},
     }
     out = call(payload, ctx(state))
-    assert out["hookSpecificOutput"]["updatedToolOutput"] == "seat-3: 제출 완료"
+    assert out["hookSpecificOutput"]["updatedToolOutput"] == {
+        "content": [{"type": "text", "text": "seat-3: 제출 완료"}]
+    }
     assert "SECRET" not in json.dumps(out, ensure_ascii=False)
 
 
@@ -133,3 +135,19 @@ def test_mode_file_defaults_to_enforce(tmp_path: Path) -> None:
     good = tmp_path / "good"
     good.write_text("observe\n")
     assert read_mode(good) is HookMode.OBSERVE
+
+
+def test_task_notification_blocked_and_not_recorded(state: FakeState) -> None:
+    prompt = "<task-notification>\n<result>SECRET-seat-3</result>\n</task-notification>"
+    out = call({"hook_event_name": "UserPromptSubmit", "prompt": prompt}, ctx(state))
+    assert out["decision"] == "block"
+    assert out["hookSpecificOutput"]["suppressOriginalPrompt"] is True
+    assert "SECRET" not in json.dumps(out, ensure_ascii=False)
+    assert state.human_inputs == []
+
+
+def test_task_notification_blocked_even_if_state_broken() -> None:
+    prompt = "<task-notification><result>SECRET</result>"
+    out = call({"hook_event_name": "UserPromptSubmit", "prompt": prompt}, ctx(BrokenState()))
+    assert out["decision"] == "block"
+    assert out["hookSpecificOutput"]["suppressOriginalPrompt"] is True

@@ -64,7 +64,7 @@ next = wake:
 | 2 | 메인의 비밀 도구 호출 | 같은 훅: `agent_type` 없음 = 메인 → 공개 도구만 허용 |
 | 3 | 도구 패밀리 침범 | 같은 훅: `seat-*`는 좌석 도구만, `mystery-architect`는 설계 도구만 쓰는 식으로 agent_type과 도구를 대응시킴 |
 | 4 | 메인이 서브에이전트에게 질문 끼워 넣기 | PreToolUse(`Agent`): 엔진이 지금 기다리는 에이전트가 아니면 deny하고, 프롬프트는 고정 문구로 교체. `SendMessage`는 deny |
-| 5 | 서브에이전트 최종 응답으로 누출 | PostToolUse(`Agent`): `updatedToolOutput`으로 봉인. SubagentStop은 제출 여부 확인 |
+| 5 | 서브에이전트 최종 응답으로 누출 | 생성 시 `run_in_background: false`로 동기 강제 → PostToolUse(`Agent`)가 `updatedToolOutput`으로 봉인(키 구성 유지). 백그라운드 결과 알림(`<task-notification>`)은 UserPromptSubmit에서 차단. SubagentStop은 제출 여부 확인 ([harness-contract.md](harness-contract.md) 함정 1·2) |
 | 6 | 파일·로그 엿보기 | 서브에이전트 `tools`는 MCP 도구만 (Read/Bash/Agent 없음). `memory` 필드는 쓰지 않음(쓰면 Read/Write가 자동으로 켜짐) |
 | 7 | 메인의 god 데이터 접근 | `play/` 권한에서 Read·Bash·Write·Edit·Glob·Grep·Web 계열 deny. `runs/`는 `play/` 바깥 |
 | 8 | 사람 발언 왜곡 | UserPromptSubmit 훅이 원문을 직접 기록. 메인은 전달하지 않음 |
@@ -166,18 +166,20 @@ mafia-with-ai/
 | D11 | 지원 범위: Claude Code 우선, 다음 단계로 Codex. 로컬 LLM과 기타 모델 API는 범위 밖 (§11 향후 확장) | 처음부터 모델 무관 엔진 주도 구조(ModelProvider)로 가기: 검토 결과 격리·이식성은 더 좋지만, 사용자가 서브에이전트 기반 원안을 택함 (2026-10-30) |
 | D12 | 에이전트 프롬프트 정본은 호스트 중립 md(`src/mafia/prompts/`). 호스트별 파일(`play/.claude/agents/*.md`의 frontmatter 등)은 `mafia setup`이 생성 | 호스트별 파일을 직접 관리: 호스트가 늘면 프롬프트가 갈라지고, 기계별 절대 경로가 리포에 들어감 |
 
-## 9. 미검증 가정 (M0에서 실측)
+## 9. 하네스 가정 검증 (M0)
 
-공식 문서(code.claude.com/docs/en/hooks, sub-agents, vs-code)로 확인한 것: 서브에이전트 내부 도구 호출의 훅 입력에 `agent_id`/`agent_type`이 들어옴, PreToolUse `updatedInput`/`deny`, PostToolUse `updatedToolOutput`(모든 도구), SubagentStop의 `last_assistant_message`와 `block`, 서브에이전트 frontmatter의 `tools`/`model`/`effort`/`omitClaudeMd`/`maxTurns`.
+결과와 발견한 함정은 [harness-contract.md](harness-contract.md)에 있다. 2026-10-30, Claude Code 2.1.312 헤드리스 기준.
 
-문서에 명시되지 않아 실측이 필요한 것:
+| # | 가정 | 결과 |
+|---|---|---|
+| 1 | Agent 결과에 `updatedToolOutput`을 적용하면 메인이 보는 내용이 바뀐다 | **조건부 확인.** 동기 실행일 때만 가능하고(기본은 백그라운드), 키 구성을 원본과 똑같이 유지해야 함. 다르면 경고 없이 무시됨 |
+| 2 | 메인 세션의 훅 입력에는 `agent_type`이 없다 | 확인 |
+| 3 | 프로젝트 훅, `.mcp.json`, `.claude/agents`가 VSCode에서도 똑같이 동작한다 | **미확인.** CLI 헤드리스로만 확인. VSCode 절차는 harness-contract.md §3 |
+| 4 | MCP 도구만 가진 서브에이전트에는 Read/Bash/Agent가 없다 | 확인 (도구 자체가 노출되지 않음) |
+| 5 | Agent의 `prompt`를 `updatedInput`으로 교체할 수 있다 | 확인 |
+| 6 | 도구 이름이 `mcp__mafia__<tool>` 형식이다 | 확인 |
 
-1. Agent 도구 결과에 `updatedToolOutput`을 적용하면 메인이 보는 내용이 실제로 바뀌는가
-2. 메인 세션의 훅 입력에 `agent_type`이 정말 없는가
-3. 프로젝트 훅, `.mcp.json`, `.claude/agents`가 VSCode 확장에서 CLI와 똑같이 동작하는가
-4. `tools`에 MCP 도구만 넣은 서브에이전트에서 Read/Bash/Agent가 정말 차단되는가
-5. Agent 호출의 `prompt`를 `updatedInput`으로 교체할 수 있는가
-6. 일반 MCP 서버의 도구 이름이 `mcp__mafia__<tool>` 형식인가
+Claude Code를 업데이트하면 `scripts/contract-headless.sh`로 다시 확인한다.
 
 ## 10. 품질 기준 (상용 수준)
 

@@ -67,11 +67,23 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
             )
             return {"decision": "block", "reason": reason} if reason else {}
         case "UserPromptSubmit":
+            prompt = _str(payload.get("prompt"))
+            if policy.is_task_notification(prompt):
+                return _blocked_notification()
             if caller.kind is CallerKind.MAIN:
-                ctx.state_factory().record_human_input(_str(payload.get("prompt")))
+                ctx.state_factory().record_human_input(prompt)
             return {}
         case _:
             return {}
+
+
+def _blocked_notification() -> dict[str, Any]:
+    """Subagent results must never reach the main session; it learns progress via `advance`."""
+    return {
+        "decision": "block",
+        "reason": "에이전트 차례가 끝났습니다.",
+        "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True},
+    }
 
 
 def fail_closed(payload: Mapping[str, Any] | None, error: BaseException) -> dict[str, Any]:
@@ -86,9 +98,11 @@ def fail_closed(payload: Mapping[str, Any] | None, error: BaseException) -> dict
             caller = classify(payload.get("agent_type") if payload else None, KNOWN_AGENTS)
             tool = _str(payload.get("tool_name")) if payload else ""
             if policy.should_seal(caller, tool):
-                return _sealed_output("subagent")
+                return _sealed_output("subagent", payload.get("tool_response") if payload else None)
             return {}
         case "UserPromptSubmit":
+            if payload and policy.is_task_notification(_str(payload.get("prompt"))):
+                return _blocked_notification()
             return {
                 "decision": "block",
                 "reason": "게임 엔진 오류로 입력을 기록하지 못했습니다. 다시 보내 주세요.",
@@ -103,15 +117,16 @@ def _post_tool_use(caller: Caller, payload: Mapping[str, Any]) -> dict[str, Any]
     if not policy.should_seal(caller, tool_name):
         return {}
     target = _mapping(payload.get("tool_input")).get("subagent_type")
-    return _sealed_output(target if isinstance(target, str) else "subagent")
+    return _sealed_output(
+        target if isinstance(target, str) else "subagent", payload.get("tool_response")
+    )
 
 
-def _sealed_output(agent_type: str) -> dict[str, Any]:
-    # Shape to be confirmed against the observed Agent tool_response (M0 contract C5).
+def _sealed_output(agent_type: str, tool_response: object) -> dict[str, Any]:
     return {
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
-            "updatedToolOutput": policy.sealed_text(agent_type),
+            "updatedToolOutput": policy.seal_tool_response(tool_response, agent_type),
         }
     }
 

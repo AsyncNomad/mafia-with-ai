@@ -9,6 +9,8 @@ from mafia.hosts.claude_code.hooks.policy import (
     Deny,
     decide_pre_tool_use,
     decide_subagent_stop,
+    is_task_notification,
+    seal_tool_response,
     should_seal,
 )
 from tests.conftest import FakeState
@@ -71,7 +73,15 @@ class TestSpawn:
             "subagent_type": "seat-3",
             "prompt": WAKE_PROMPT,
             "description": "seat-3 차례",
+            "run_in_background": False,
         }
+
+    def test_spawn_forced_foreground_even_when_omitted(self, state: FakeState) -> None:
+        # Claude Code 2.1.312 defaults Agent to background, which bypasses PostToolUse sealing.
+        decision = decide_pre_tool_use(MAIN, "Agent", {"subagent_type": "seat-3"}, state)
+        assert isinstance(decision, Allow)
+        assert decision.updated_input is not None
+        assert decision.updated_input["run_in_background"] is False
 
     def test_not_awaited_agent_denied(self, state: FakeState) -> None:
         assert isinstance(
@@ -145,3 +155,51 @@ class TestSealAndStop:
 
     def test_main_stop_never_blocked(self, state: FakeState) -> None:
         assert decide_subagent_stop(MAIN, stop_hook_active=False, state=state) is None
+
+
+class TestSealResponse:
+    def test_dict_response_keeps_envelope_and_replaces_content(self) -> None:
+        response = {
+            "status": "completed",
+            "agentId": "a1",
+            "prompt": "차례가 되었습니다.",
+            "content": [{"type": "text", "text": "SECRET-seat-3-abcd"}],
+            "totalTokens": 10,
+        }
+        sealed = seal_tool_response(response, "seat-3")
+        assert sealed == {
+            "status": "completed",
+            "agentId": "a1",
+            "prompt": "차례가 되었습니다.",
+            "content": [{"type": "text", "text": "seat-3: 제출 완료"}],
+            "totalTokens": 10,
+        }
+        assert isinstance(sealed, dict)
+        assert sealed.keys() == response.keys()
+
+    @pytest.mark.parametrize("field", ["result", "text", "output", "message", "summary"])
+    def test_text_fields_replaced(self, field: str) -> None:
+        sealed = seal_tool_response({field: "SECRET", "status": "ok"}, "seat-3")
+        assert "SECRET" not in str(sealed)
+
+    @pytest.mark.parametrize("response", ["SECRET", None, 42, ["SECRET"]])
+    def test_non_mapping_response_becomes_text(self, response: object) -> None:
+        assert seal_tool_response(response, "seat-3") == "seat-3: 제출 완료"
+
+    def test_original_response_not_mutated(self) -> None:
+        response = {"content": [{"type": "text", "text": "SECRET"}]}
+        seal_tool_response(response, "seat-3")
+        assert response["content"][0]["text"] == "SECRET"
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("<task-notification>\n<task-id>a1</task-id>", True),
+        ("  \n<task-notification>", True),
+        ("도윤 님 그건 억측이에요 <task-notification>", False),
+        (":vote 도윤", False),
+    ],
+)
+def test_is_task_notification(prompt: str, expected: bool) -> None:
+    assert is_task_notification(prompt) is expected
