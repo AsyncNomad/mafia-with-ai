@@ -18,6 +18,7 @@ dev = [
     "pytest>=8",
     "ruff>=0.6",
     "pyright>=1.1.380",
+    "import-linter>=2.15",
 ]
 
 [build-system]
@@ -40,3 +41,32 @@ typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.importlinter]
+root_package = "mafia"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Engine and modes are pure (no I/O layers, no host adapters)"
+type = "forbidden"
+source_modules = ["mafia.engine", "mafia.modes"]
+forbidden_modules = [
+    "mafia.store",
+    "mafia.service",
+    "mafia.hosts",
+    "mafia.harness",
+    "mafia.cli",
+    "mcp",
+]
+
+[[tool.importlinter.contracts]]
+name = "Engine does not depend on any concrete mode"
+type = "forbidden"
+source_modules = ["mafia.engine"]
+forbidden_modules = ["mafia.modes"]
+
+[[tool.importlinter.contracts]]
+name = "Host-neutral harness contract does not depend on a host"
+type = "forbidden"
+source_modules = ["mafia.harness"]
+forbidden_modules = ["mafia.hosts"]
