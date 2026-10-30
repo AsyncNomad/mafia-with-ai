@@ -16,15 +16,31 @@ from mafia.engine.core_events import (
     SeatsAnnounced,
 )
 from mafia.engine.events import Body, Event
+from mafia.modes.mystery import narration as mystery
 from mafia.modes.original import narration as original
 
 Names = Callable[[int | None], str]
 
 _MODE_NARRATORS: Mapping[str, Callable[[Body, Names], str | None]] = {
     "original": original.narrate,
+    "mystery": mystery.narrate,
 }
-PHASE_LABELS = original.PHASE_LABELS
-TEAM_LABELS = original.TEAM_LABELS
+_PHASE_LABELS: Mapping[str, Mapping[str, str]] = {
+    "original": original.PHASE_LABELS,
+    "mystery": mystery.PHASE_LABELS,
+}
+_TEAM_LABELS: Mapping[str, Mapping[str, str]] = {
+    "original": original.TEAM_LABELS,
+    "mystery": mystery.TEAM_LABELS,
+}
+
+
+def phase_label(mode: str, phase: str) -> str:
+    return _PHASE_LABELS.get(mode, {}).get(phase, phase)
+
+
+def team_label(mode: str, team: str) -> str:
+    return _TEAM_LABELS.get(mode, {}).get(team, team)
 
 
 def name_lookup(seats: Sequence[SeatInfo]) -> Names:
@@ -61,12 +77,14 @@ def narrate(event: Event, mode: str, names: Names) -> str | None:
             return "참가자 — " + ", ".join(names(s.seat) for s in seats)
         case PhaseChanged.KIND:
             b = event.body_as(PhaseChanged)
-            return f"── {b.day}일차 · {PHASE_LABELS.get(b.phase, b.phase)} ──"
+            if mode == "mystery":
+                return f"── {phase_label(mode, b.phase)} ──"
+            return f"── {b.day}일차 · {phase_label(mode, b.phase)} ──"
         case ActionSubmitted.KIND:
             return _own_action(event.body_as(ActionSubmitted), names)
         case GameEnded.KIND:
             b = event.body_as(GameEnded)
-            return f"🏁 게임 종료 — {TEAM_LABELS.get(b.winner, b.winner)} 승리 ({b.reason})"
+            return f"🏁 게임 종료 — {team_label(mode, b.winner)} 승리"
         case (
             GameCreated.KIND | SeatProfileAssigned.KIND | RequestOpened.KIND | ContextDelivered.KIND
         ):

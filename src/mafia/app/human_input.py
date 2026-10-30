@@ -23,6 +23,7 @@ class Command(StrEnum):
     ROLE = "role"
     LOG = "log"
     HELP = "help"
+    SHOW = "show"
     UNKNOWN = "unknown"
     SPEECH = "speech"  # free text
 
@@ -34,6 +35,10 @@ _ALIASES: dict[str, Command] = {
     ":투표": Command.VOTE,
     ":target": Command.VOTE,
     ":대상": Command.VOTE,
+    ":go": Command.VOTE,
+    ":조사": Command.VOTE,
+    ":show": Command.SHOW,
+    ":공개": Command.SHOW,
     ":yes": Command.YES,
     ":찬성": Command.YES,
     ":no": Command.NO,
@@ -53,6 +58,8 @@ HELP_TEXT = """\
 - 발언 차례: 채팅창에 그냥 말하면 발언이 됩니다
 - `:pass` — 패스 / 기권
 - `:vote 이름` 또는 `:vote 번호` — 지목·밤 행동 대상 선택
+- `:go 장소` — (머더 미스터리) 조사할 장소 선택
+- `:show 카드id 할 말` — (머더 미스터리) 카드를 공개하며 발언
 - `:yes` / `:no` — 찬반 투표
 - `:who` — 생존자와 현재 단계
 - `:role` — 내 역할 다시 보기
@@ -89,3 +96,25 @@ def resolve_seat(argument: str, seats: Sequence[SeatInfo]) -> int | None:
         return exact[0]
     prefix = [s.seat for s in seats if s.name.startswith(arg)]
     return prefix[0] if len(prefix) == 1 else None
+
+
+def resolve_label(argument: str, options: Sequence[int], labels: Sequence[str]) -> int | None:
+    """Option by number, exact label, or unique label prefix."""
+    arg = argument.strip().removesuffix("번").strip()
+    if arg.isdigit():
+        number = int(arg)
+        return number if number in options else None
+    exact = [o for o, label in zip(options, labels, strict=True) if label == arg]
+    if exact:
+        return exact[0]
+    prefix = [o for o, label in zip(options, labels, strict=True) if arg and label.startswith(arg)]
+    return prefix[0] if len(prefix) == 1 else None
+
+
+def split_show(argument: str) -> tuple[tuple[str, ...], str]:
+    """':show k12 k03 이 카드 보세요' -> (('k12', 'k03'), '이 카드 보세요')."""
+    cards: list[str] = []
+    words = argument.split()
+    while words and len(words[0]) == 3 and words[0][0].lower() == "k" and words[0][1:].isdigit():
+        cards.append(words.pop(0).lower())
+    return tuple(cards), " ".join(words)

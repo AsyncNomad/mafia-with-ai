@@ -9,6 +9,7 @@ from typing import Any
 from mafia.engine.core_events import PhaseChanged, SeatInfo
 from mafia.engine.events import Event
 from mafia.engine.requests import Answer, SeatRequest
+from mafia.views.mystery_sheet import render_sheet
 from mafia.views.narration import name_lookup, narrate
 
 SEAT_MARKS = ("🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "🟫", "⬜")
@@ -46,6 +47,8 @@ def render_events(events: Sequence[Event], seats: Sequence[SeatInfo], mode: str)
 
 
 def render_role_card(brief: Mapping[str, Any], seats: Sequence[SeatInfo]) -> str:
+    if brief.get("mode") == "mystery":
+        return render_sheet(brief, heading="###")
     names = _marked_names(seats)
     lines = [
         f"> **당신의 역할: {brief['role']}** — {brief['role_description']}",
@@ -60,6 +63,18 @@ def render_human_request(request: SeatRequest, seats: Sequence[SeatInfo]) -> str
     names = _marked_names(seats)
     lines = [f"**🙋 당신의 차례입니다.** {request.instruction}"]
     if request.options:
+        if request.option_labels:
+            listed = ", ".join(
+                f"{o}. {label}"
+                for o, label in zip(request.options, request.option_labels, strict=True)
+            )
+            lines.append(f"선택지: {listed}")
+            lines.append("`:go 장소이름` 또는 `:go 번호`로 고르세요. 기권(무작위 장소)은 `:pass`")
+            return "\n".join(lines)
         lines.append("선택지: " + ", ".join(names(o) for o in request.options))
     lines.append(HUMAN_HOW_TO[request.answer])
+    if request.answer is Answer.SPEECH and "reveal" in request.instruction:
+        lines.append(
+            "카드를 공개하며 말하려면 `:show 카드id 할 말` (예: `:show k12 이 영수증을 보세요`)"
+        )
     return "\n".join(lines)

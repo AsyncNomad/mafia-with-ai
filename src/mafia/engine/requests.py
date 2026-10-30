@@ -30,6 +30,8 @@ class RequestSpec(BaseModel):
     answer: Answer
     instruction: str  # shown to the seat, in Korean
     options: tuple[int, ...] = ()
+    # Display names for `options` when they are not seats (e.g. locations), same order.
+    option_labels: tuple[str, ...] = ()
     allow_pass: bool = False
 
 
@@ -43,6 +45,9 @@ class Action(BaseModel):
     speech: str | None = Field(default=None, max_length=MAX_SPEECH_CHARS)
     target: int | None = None
     approve: bool | None = None
+    # Card ids to reveal publicly together with a speech (murder mystery). The engine shows the
+    # card's real text, so a revealed card cannot be forged.
+    reveal: tuple[str, ...] = Field(default=(), max_length=3)
     # Never shown to other seats. Returned to the same seat as its own memory.
     private_note: str | None = Field(default=None, max_length=MAX_NOTE_CHARS)
     # 0-100 per seat, god-only; feeds the post-game suspicion matrix.
@@ -62,8 +67,10 @@ def validate_shape(request: SeatRequest, action: Action, seat_count: int) -> Non
                 raise ActionRejected("이 요청은 패스할 수 없습니다. speech를 채워 주세요.")
             if action.speech is not None and not action.speech.strip():
                 raise ActionRejected("빈 발언은 낼 수 없습니다. 패스하려면 speech를 비워 두세요.")
+            if action.reveal and action.speech is None:
+                raise ActionRejected("카드를 공개할 때는 한마디라도 발언을 함께 해야 합니다.")
         case Answer.TARGET:
-            if action.speech is not None or action.approve is not None:
+            if action.speech is not None or action.approve is not None or action.reveal:
                 raise ActionRejected("대상 선택 요청에는 target만 채워야 합니다.")
             if action.target is None:
                 if not request.allow_pass:
@@ -71,7 +78,7 @@ def validate_shape(request: SeatRequest, action: Action, seat_count: int) -> Non
             elif action.target not in request.options:
                 raise ActionRejected(f"고를 수 있는 대상은 {list(request.options)}입니다.")
         case Answer.APPROVAL:
-            if action.speech is not None or action.target is not None:
+            if action.speech is not None or action.target is not None or action.reveal:
                 raise ActionRejected("찬반 요청에는 approve만 채워야 합니다.")
             if action.approve is None and not request.allow_pass:
                 raise ActionRejected("approve에 찬성(true) 또는 반대(false)를 넣어 주세요.")

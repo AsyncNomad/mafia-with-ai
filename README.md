@@ -81,6 +81,9 @@ uv run mafia setup      # play/ 게임 테이블 워크스페이스를 생성합
 |---|---|
 | `/mafia new 내이름` | 나 + AI 7명으로 새 게임 (내 좌석과 역할은 무작위) |
 | `/mafia watch` | AI 8명끼리 하는 관전 게임 |
+| `/mafia new mystery` | 머더 미스터리. 준비된 시나리오가 없으면 AI들이 먼저 만들고 검증합니다(수십 분) |
+| `/mafia watch mystery` | AI 8명끼리 하는 머더 미스터리 관전 |
+| `/mafia prepare 요청` | 머더 미스터리 시나리오만 미리 만들어 두기 (예: `/mafia prepare 1930년대 경성 백화점`) |
 | `/mafia continue` | 진행 중인 게임 이어 하기 |
 | `/mafia status` | 현재 일차, 단계, 생존자 |
 
@@ -90,6 +93,8 @@ uv run mafia setup      # play/ 게임 테이블 워크스페이스를 생성합
 |---|---|
 | 발언 | 채팅창에 그냥 말합니다 |
 | 지목 투표 · 밤 행동 | `:vote 이름` 또는 `:vote 번호` |
+| (머더 미스터리) 조사할 장소 | `:go 장소이름` 또는 `:go 번호` |
+| (머더 미스터리) 카드를 공개하며 발언 | `:show 카드id 할 말` (예: `:show k12 이 영수증을 보세요`) |
 | 찬반 투표 | `:yes` / `:no` |
 | 패스 · 기권 | `:pass` |
 | 내 역할 / 생존자 / 최근 기록 / 도움말 | `:role` / `:who` / `:log` / `:help` |
@@ -114,6 +119,7 @@ uv run mafia tail --seat 3   # 3번 좌석이 아는 것만
 
 ```bash
 uv run mafia games                      # 저장된 게임 목록
+uv run mafia scenarios                  # 머더 미스터리 시나리오 라이브러리 (--spoil 은 진상까지)
 uv run mafia replay --god               # 마지막 게임을 신의 시점으로 재생
 uv run mafia replay --game g-xxxx --speed 3   # 특정 게임을 3배속으로 (0이면 즉시 출력)
 ```
@@ -133,7 +139,7 @@ scripts/contract-headless.sh     # Claude Code 업데이트 후 격리 계약 �
 ```
 
 - 설계: [docs/design.md](docs/design.md) · 모드 규칙: [docs/modes/](docs/modes/) · 하네스 실측: [docs/harness-contract.md](docs/harness-contract.md)
-- 다음 계획: 머더 미스터리 모드, Codex 지원
+- 다음 계획: 머더 미스터리 실전 검증, Codex 지원
 
 ---
 

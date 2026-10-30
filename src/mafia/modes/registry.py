@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from mafia.engine.mode import Mode
+from mafia.modes.mystery.rules import MysteryConfig, MysteryMode
 from mafia.modes.original.config import OriginalConfig
 from mafia.modes.original.rules import OriginalMode
 
@@ -16,8 +17,13 @@ def _original(config: Mapping[str, Any]) -> Mode[Any]:
     return OriginalMode(OriginalConfig.model_validate(dict(config)))
 
 
+def _mystery(config: Mapping[str, Any]) -> Mode[Any]:
+    return MysteryMode(MysteryConfig.model_validate(dict(config)))
+
+
 _FACTORIES: dict[str, ModeFactory] = {
     OriginalMode.name: _original,
+    MysteryMode.name: _mystery,
 }
 
 

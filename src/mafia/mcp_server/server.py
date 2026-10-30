@@ -34,7 +34,8 @@ def _guard(fn: Callable[[], str]) -> str:
 # --- driver -------------------------------------------------------------------------------
 @server.tool()
 def new_game(human_name: str = "나", watch: bool = False, mode: str = "original") -> str:
-    """새 게임을 시작한다. human_name: 사람 플레이어 이름. watch=true면 AI 8명끼리 하는 관전 모드.
+    """새 게임을 시작한다. mode: "original"(마피아) 또는 "mystery"(머더 미스터리).
+    human_name: 사람 플레이어 이름. watch=true면 AI 8명끼리 하는 관전 모드.
     결과의 <display>는 그대로 출력하고 <next>에 따라 진행한다."""
     return app().new_game(mode=mode, human_name=human_name, watch=watch).to_text()
 
@@ -120,13 +121,20 @@ def my_turn(seat: int) -> str:
 def submit_speech(
     seat: int,
     speech: str | None = None,
+    reveal: list[str] | None = None,
     private_note: str | None = None,
     suspicion: dict[str, int] | None = None,
 ) -> str:
-    """발언 제출. speech를 생략하면 패스. private_note는 나만 보는 메모, suspicion은 {좌석 번호: 0~100}."""
+    """발언 제출. speech를 생략하면 패스. reveal: 함께 공개할 손패 카드 id(머더 미스터리, 최대 3장).
+    private_note는 나만 보는 메모, suspicion은 {좌석 번호: 0~100}."""
     return _guard(
         lambda: app().seat_submit(
-            seat, Answer.SPEECH, speech=speech, private_note=private_note, suspicion=suspicion
+            seat,
+            Answer.SPEECH,
+            speech=speech,
+            reveal=reveal,
+            private_note=private_note,
+            suspicion=suspicion,
         )
     )
 

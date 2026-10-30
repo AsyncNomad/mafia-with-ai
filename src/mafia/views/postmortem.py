@@ -8,7 +8,7 @@ from mafia.engine.core_events import ActionSubmitted, GameEnded, SeatInfo
 from mafia.engine.events import Event
 from mafia.modes.original.events import NightResolved, RolesRevealed
 from mafia.modes.original.roles import Role
-from mafia.views.narration import TEAM_LABELS, name_lookup
+from mafia.views.narration import name_lookup, team_label
 
 _NOTE_CHARS = 140
 
@@ -29,7 +29,7 @@ def render_postmortem(log: Sequence[Event], seats: Sequence[SeatInfo], mode: str
         role = roles.get(seat)
         return f"{names(seat)} {role.label}" if role else names(seat)
 
-    out = ["## 🔍 복기", f"**{TEAM_LABELS.get(ended.winner, ended.winner)} 승리**"]
+    out = ["## 🔍 복기", f"**{team_label(mode, ended.winner)} 승리**"]
 
     nights = [e.body_as(NightResolved) for e in log if e.kind == NightResolved.KIND]
     if nights:

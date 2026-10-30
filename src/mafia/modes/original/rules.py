@@ -17,7 +17,7 @@ from typing import Any
 from mafia.engine.core_events import ActionSubmitted, GameEnded, PhaseChanged, RequestOpened
 from mafia.engine.events import Event, NewEvent, emit
 from mafia.engine.mode import CoreState, Progress
-from mafia.engine.requests import Action, Answer, RequestSpec, SeatRequest
+from mafia.engine.requests import Action, ActionRejected, Answer, RequestSpec, SeatRequest
 from mafia.engine.runtime import rng_for
 from mafia.engine.visibility import Viewer, Visibility
 from mafia.modes.original.config import OriginalConfig
@@ -509,7 +509,8 @@ class OriginalMode:
         self, state: OriginalState, core: CoreState, request: SeatRequest, action: Action
     ) -> None:
         # Options are fixed when the request opens and nothing changes them before it closes.
-        return None
+        if action.reveal:
+            raise ActionRejected("이 모드에는 공개할 카드가 없습니다.")
 
     def on_action(
         self, state: OriginalState, core: CoreState, request: SeatRequest, action: Action

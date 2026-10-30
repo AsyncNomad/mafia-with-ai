@@ -15,7 +15,14 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from mafia import paths
-from mafia.app.human_input import HELP_TEXT, Command, parse, resolve_seat
+from mafia.app.human_input import (
+    HELP_TEXT,
+    Command,
+    parse,
+    resolve_label,
+    resolve_seat,
+    split_show,
+)
 from mafia.app.prep import PrepService, Stage, StartGame
 from mafia.engine.core_events import ContextDelivered, GameEnded, SeatInfo
 from mafia.engine.events import Event
@@ -25,6 +32,8 @@ from mafia.engine.visibility import Viewer, can_see
 from mafia.harness.identity import CallerKind, classify
 from mafia.harness.ports import HumanInputKind, HumanInputOutcome
 from mafia.harness.tools import KNOWN_AGENTS
+from mafia.modes.mystery.rules import cast_seats
+from mafia.modes.mystery.scenario import Scenario
 from mafia.personas import Persona, load_personas, pick
 from mafia.service import GameService, Loaded
 from mafia.store.db import connect
@@ -32,7 +41,7 @@ from mafia.store.events import EventStore
 from mafia.store.harness import HarnessStore
 from mafia.store.scenarios import ScenarioStore
 from mafia.views.chat_md import render_events, render_human_request, render_role_card
-from mafia.views.narration import PHASE_LABELS, name_lookup
+from mafia.views.narration import name_lookup, phase_label
 from mafia.views.postmortem import render_postmortem
 from mafia.views.seat_text import render_seat_context
 
@@ -90,6 +99,32 @@ class TableApp:
             raise LookupError("이 테이블에는 시나리오 준비 기능이 없습니다.")
         return self.preparation
 
+    def _new_mystery(
+        self, *, human_name: str, watch: bool, seed: str | None, scenario_id: str | None = None
+    ) -> AdvanceResult:
+        store = self.prep().store
+        record = store.get(scenario_id) if scenario_id else store.next_unplayed()
+        if record is None or record.scenario is None:
+            started = self.prepare_mystery("", StartGame(human_name=human_name, watch=watch))
+            note = "라이브러리에 준비된 시나리오가 없어 새로 만듭니다. 시나리오가 완성되면 바로 게임이 시작됩니다."
+            return AdvanceResult(f"{note}\n\n{started.display}", started.next)
+        scenario = Scenario.model_validate(record.scenario)
+        seed = seed or secrets.token_hex(16)
+        cast = cast_seats(seed, [c.id for c in scenario.characters])
+        human_seat = None if watch else rng_for(seed, "table").randint(1, SEAT_COUNT)
+        seats = [
+            SeatInfo(seat=s, name=scenario.character(cid).name) for s, cid in sorted(cast.items())
+        ]
+        self.service.new_game(
+            mode="mystery",
+            seats=seats,
+            human_seats=[] if human_seat is None else [human_seat],
+            seed=seed,
+            config={"scenario": record.scenario},
+        )
+        store.mark_played(record.scenario_id)
+        return self.advance()
+
     # --- murder-mystery preparation -----------------------------------------------------
     def prepare_mystery(
         self, request: str = "", start_game: StartGame | None = None
@@ -105,9 +140,17 @@ class TableApp:
             return AdvanceResult(
                 progress.display, Next("wake", progress.agents, parallel=len(progress.agents) > 1)
             )
+        if progress.stage is Stage.VERIFIED and progress.start_game is not None:
+            game = self._new_mystery(
+                human_name=progress.start_game.human_name,
+                watch=progress.start_game.watch,
+                seed=None,
+                scenario_id=progress.scenario_id,
+            )
+            return AdvanceResult(f"{progress.display}\n\n{game.display}", game.next)
         tail = ""
         if progress.stage is Stage.VERIFIED:
-            tail = "\n\n시나리오가 라이브러리에 저장되었습니다. 머더 미스터리 게임은 곧 지원됩니다."
+            tail = "\n\n시나리오가 라이브러리에 저장되었습니다. `/mafia new mystery`로 시작하세요."
         return AdvanceResult(progress.display + tail, Next("ended"))
 
     # --- driver (main session) ----------------------------------------------------------
@@ -120,6 +163,8 @@ class TableApp:
         seed: str | None = None,
         config: Mapping[str, Any] | None = None,
     ) -> AdvanceResult:
+        if mode == "mystery":
+            return self._new_mystery(human_name=human_name, watch=watch, seed=seed)
         seed = seed or secrets.token_hex(16)
         rng = rng_for(seed, "table")
         human_seat = None if watch else rng.randint(1, SEAT_COUNT)
@@ -189,7 +234,7 @@ class TableApp:
         names = name_lookup(core.seats)
         alive = getattr(loaded.state.mode, "alive", frozenset(core.seat_numbers))
         return (
-            f"{core.day}일차 · {PHASE_LABELS.get(core.phase, core.phase)}"
+            f"{core.day}일차 · {phase_label(core.mode, core.phase)}"
             f"{' · 종료' if core.ended else ''}\n"
             f"생존자: {', '.join(names(s) for s in sorted(alive))}"
         )
@@ -213,6 +258,7 @@ class TableApp:
         approve: bool | None = None,
         private_note: str | None = None,
         suspicion: Mapping[str, int] | Mapping[int, int] | None = None,
+        reveal: Sequence[str] | None = None,
     ) -> str:
         game_id = self.game_id()
         loaded = self.service.load(game_id)
@@ -228,6 +274,7 @@ class TableApp:
                 speech=speech,
                 target=target,
                 approve=approve,
+                reveal=tuple(reveal or ()),
                 private_note=private_note,
                 suspicion={int(k): int(v) for k, v in suspicion.items()} if suspicion else None,
             )
@@ -307,6 +354,20 @@ class TableApp:
         match parsed.command:
             case Command.PASS:
                 action = Action()
+            case Command.SHOW:
+                if request.answer is not Answer.SPEECH:
+                    return _rejected("카드는 발언 차례에만 공개할 수 있습니다.")
+                cards, words = split_show(parsed.argument)
+                if not cards:
+                    return _rejected(
+                        "공개할 카드 id를 적어 주세요. 예: `:show k12 이 카드를 보세요`"
+                    )
+                action = Action(speech=words or "이 카드를 보세요.", reveal=cards)
+            case Command.VOTE if request.option_labels:
+                target = resolve_label(parsed.argument, request.options, request.option_labels)
+                if target is None:
+                    return _rejected(f"'{parsed.argument}'에 해당하는 선택지를 찾지 못했습니다.")
+                action = Action(target=target)
             case Command.VOTE:
                 if request.answer is not Answer.TARGET:
                     return _rejected("지금은 대상을 고르는 차례가 아닙니다.")
@@ -383,12 +444,18 @@ class TableApp:
 
     def _intro(self, loaded: Loaded, human: int | None) -> str:
         core = loaded.state.core
-        lines = ["## 🔪 마피아 게임을 시작합니다"]
+        title = (
+            "🕯 머더 미스터리를 시작합니다"
+            if core.mode == "mystery"
+            else "🔪 마피아 게임을 시작합니다"
+        )
+        lines = [f"## {title}"]
         if human is None:
             lines.append("관전 모드입니다. AI 8명이 플레이합니다.")
         else:
             brief = loaded.engine.mode.seat_brief(loaded.state.mode, core, human)
-            lines.append(f"당신은 **{name_lookup(core.seats)(human)}** 좌석입니다.")
+            role = "역을 맡았습니다" if core.mode == "mystery" else "좌석입니다"
+            lines.append(f"당신은 **{name_lookup(core.seats)(human)}** {role}.")
             lines.append(render_role_card(brief, core.seats))
             lines.append("명령어는 `:help`")
         return "\n\n".join(lines)
