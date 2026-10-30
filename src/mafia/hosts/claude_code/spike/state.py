@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from mafia import paths
+from mafia.harness.ports import HumanInputKind, HumanInputOutcome
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS awaiting (
@@ -58,8 +59,12 @@ class SpikeState:
         ).fetchone()
         return row is not None
 
-    def record_human_input(self, text: str) -> None:
+    def handle_human_input(self, text: str) -> HumanInputOutcome:
         self._conn.execute("INSERT INTO human_inputs (text, at) VALUES (?, ?)", (text, time.time()))
+        return HumanInputOutcome(HumanInputKind.PASSTHROUGH)
+
+    def record_agent_finished(self, agent_type: str) -> None:
+        return None
 
     # --- spike engine -------------------------------------------------------------------
     def arm(self, agent_types: Iterable[str]) -> None:

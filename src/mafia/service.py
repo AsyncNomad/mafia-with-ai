@@ -46,12 +46,13 @@ class GameService:
         seed: str | None = None,
         config: Mapping[str, Any] | None = None,
         game_id: str | None = None,
+        profiles: Mapping[int, Mapping[str, Any]] | None = None,
     ) -> str:
         game_id = game_id or f"g-{secrets.token_hex(6)}"
         seed = seed or secrets.token_hex(16)
         resolved = dict(config) if config is not None else default_config(mode)
         engine: Engine[Any] = Engine(build_mode(mode, resolved), self.clock)
-        created = engine.create(game_id, seed, seats, human_seats)
+        created = engine.create(game_id, seed, seats, human_seats, profiles)
         advanced = engine.advance(created.state)
         events = created.events + advanced.events
         self.store.create_game(game_id, mode, resolved, self.clock.now())

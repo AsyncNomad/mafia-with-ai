@@ -19,6 +19,7 @@ from mafia.engine.core_events import (
     PhaseChanged,
     RequestOpened,
     SeatInfo,
+    SeatProfileAssigned,
     SeatsAnnounced,
 )
 from mafia.engine.events import Event, NewEvent, emit
@@ -146,7 +147,9 @@ class Engine[S]:
         seed: str,
         seats: Sequence[SeatInfo],
         human_seats: Iterable[int] = (),
+        profiles: Mapping[int, Mapping[str, Any]] | None = None,
     ) -> Step[S]:
+        """Seat the table. `profiles` (e.g. AI personas) are shown only to their own seat."""
         numbers = [s.seat for s in seats]
         if sorted(numbers) != list(range(1, len(seats) + 1)):
             raise EngineError(f"seats must be numbered 1..{len(seats)}, got {numbers}")
@@ -161,6 +164,14 @@ class Engine[S]:
             )
         )
         out.add(emit(SeatsAnnounced(seats=tuple(seats)), Visibility.public()))
+        for seat, profile in sorted((profiles or {}).items()):
+            if seat not in numbers:
+                raise EngineError(f"profile for unknown seat {seat}")
+            out.add(
+                emit(
+                    SeatProfileAssigned(seat=seat, profile=dict(profile)), Visibility.to_seats(seat)
+                )
+            )
         out.add_all(self.mode.setup(out.state.mode, out.state.core))
         return out.step()
 

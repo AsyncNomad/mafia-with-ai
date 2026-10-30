@@ -32,6 +32,22 @@ MIGRATIONS: Sequence[str] = (
         value TEXT NOT NULL
     );
     """,
+    # 2: harness bookkeeping (subagent runs per request, per-viewer render cursors)
+    """
+    CREATE TABLE agent_runs (
+        game_id     TEXT NOT NULL REFERENCES games (game_id),
+        request_id  TEXT NOT NULL,
+        agent_type  TEXT NOT NULL,
+        finished_at REAL NOT NULL,
+        PRIMARY KEY (game_id, request_id)
+    );
+    CREATE TABLE cursors (
+        game_id  TEXT NOT NULL REFERENCES games (game_id),
+        viewer   TEXT NOT NULL,
+        last_seq INTEGER NOT NULL,
+        PRIMARY KEY (game_id, viewer)
+    );
+    """,
 )
 
 

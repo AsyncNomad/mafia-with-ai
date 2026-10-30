@@ -45,6 +45,7 @@ HOOK_EVENTS_WITH_MATCHER = ("PreToolUse", "PostToolUse")
 HOOK_EVENTS_WITHOUT_MATCHER = ("UserPromptSubmit", "SubagentStart", "SubagentStop")
 
 SPIKE_SEATS = (1, 2)
+SEAT_COUNT = 8
 SPIKE_SERVER_MODULE = "mafia.hosts.claude_code.spike.server"
 
 
@@ -104,6 +105,34 @@ def spike_seat_files() -> list[AgentFile]:
     ]
 
 
+def game_seat_files(seat_count: int = SEAT_COUNT) -> list[AgentFile]:
+    body = (paths.prompts_dir() / "agents" / "seat.md").read_text(encoding="utf-8")
+    return [
+        AgentFile(
+            name=seat_agent_name(seat),
+            description=f"마피아 게임 {seat}번 좌석 플레이어. advance가 이 좌석을 깨우라고 할 때만 호출한다.",
+            tools=tuple(sorted(SEAT_TOOLS)),
+            model=MODEL_FOR_TIER[ModelTier.BALANCED],
+            body=body,
+            effort="medium",
+            max_turns=10,
+        )
+        for seat in range(1, seat_count + 1)
+    ]
+
+
+def render_skill() -> str:
+    body = (paths.prompts_dir() / "skill_mafia.md").read_text(encoding="utf-8")
+    return (
+        "---\n"
+        f"# {GENERATED_MARKER}\n"
+        "name: mafia\n"
+        "description: 마피아 게임을 시작하거나 이어 간다 (new / watch / continue / status).\n"
+        'argument-hint: "[new [이름] | watch | continue | status]"\n'
+        "---\n\n" + body.strip() + "\n"
+    )
+
+
 def hook_command(python: Path) -> str:
     return f'"{python}" -m mafia.hosts.claude_code.hooks'
 
@@ -134,12 +163,10 @@ def mcp_config(python: Path, server_module: str, runs_dir: Path) -> dict[str, An
     }
 
 
-PLAY_CLAUDE_MD = """\
-# mafia-with-ai 플레이 워크스페이스
+SPIKE_CLAUDE_MD = """\
+# mafia-with-ai 하네스 검증 워크스페이스 (M0 spike)
 
-이 폴더는 `mafia setup`이 생성한 게임 테이블입니다. 당신은 게임 진행 드라이버이며,
-게임의 비밀(역할, 시나리오 진상)을 알지 못하고 알려고 해서도 안 됩니다.
-게임은 MCP `mafia` 서버의 공개 도구로만 진행합니다.
+이 폴더는 `mafia setup --spike`가 생성한 하네스 검증용 테이블입니다.
 """
 
 
@@ -148,15 +175,24 @@ def write_workspace(play_dir: Path, *, spike: bool, python: Path | None = None) 
     python = python or Path(sys.executable)
     server_module = SPIKE_SERVER_MODULE if spike else "mafia.mcp_server.server"
     agents: list[AgentFile] = [agent_file_from_spec(s) for s in MYSTERY_AGENTS]
-    if spike:
-        agents += spike_seat_files()
+    agents += spike_seat_files() if spike else game_seat_files()
 
     agents_dir = play_dir / ".claude" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     _remove_stale_agents(agents_dir, {a.name for a in agents})
 
     written: list[Path] = []
-    written.append(_write(play_dir / "CLAUDE.md", PLAY_CLAUDE_MD))
+    claude_md = (
+        SPIKE_CLAUDE_MD
+        if spike
+        else (paths.prompts_dir() / "driver.md").read_text(encoding="utf-8")
+    )
+    written.append(_write(play_dir / "CLAUDE.md", claude_md))
+    skill = play_dir / ".claude" / "skills" / "mafia" / "SKILL.md"
+    if spike:
+        skill.unlink(missing_ok=True)
+    else:
+        written.append(_write(skill, render_skill()))
     written.append(
         _write_json(play_dir / ".mcp.json", mcp_config(python, server_module, paths.runs_dir()))
     )

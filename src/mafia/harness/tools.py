@@ -8,10 +8,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+MCP_SERVER_NAME = "mafia"
+
 # Callable by the main session. Must never return information beyond the human's own view.
 PUBLIC_TOOLS: frozenset[str] = frozenset(
     {
-        "ping",
+        "new_game",
+        "advance",
+        "status",
+        "ping",  # M0 spike only
         "spike_arm",  # M0 spike only
     }
 )
@@ -21,6 +26,8 @@ SEAT_TOOLS: frozenset[str] = frozenset(
     {
         "my_turn",
         "submit_speech",
+        "submit_target",
+        "submit_approval",
     }
 )
 

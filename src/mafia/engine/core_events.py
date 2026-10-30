@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -32,6 +32,14 @@ class SeatsAnnounced(Body):
 
     KIND: ClassVar[str] = "seats_announced"
     seats: tuple[SeatInfo, ...]
+
+
+class SeatProfileAssigned(Body):
+    """Seat-only: who this seat is as a character (persona). Mode-independent."""
+
+    KIND: ClassVar[str] = "seat_profile_assigned"
+    seat: int
+    profile: dict[str, Any]
 
 
 class PhaseChanged(Body):

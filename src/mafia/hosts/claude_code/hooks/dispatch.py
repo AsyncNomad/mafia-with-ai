@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from mafia.harness.identity import Caller, CallerKind, classify
-from mafia.harness.ports import HarnessState
+from mafia.harness.ports import HarnessState, HumanInputKind, HumanInputOutcome
 from mafia.harness.tools import KNOWN_AGENTS
 from mafia.hosts.claude_code.hooks import policy
 
@@ -62,18 +62,39 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
         case "PostToolUse":
             return _post_tool_use(caller, payload)
         case "SubagentStop":
+            state = ctx.state_factory()
             reason = policy.decide_subagent_stop(
-                caller, bool(payload.get("stop_hook_active")), ctx.state_factory()
+                caller, bool(payload.get("stop_hook_active")), state
             )
-            return {"decision": "block", "reason": reason} if reason else {}
+            if reason:
+                return {"decision": "block", "reason": reason}
+            if caller.kind in (CallerKind.SEAT, CallerKind.AGENT) and caller.agent_type:
+                state.record_agent_finished(caller.agent_type)
+            return {}
         case "UserPromptSubmit":
             prompt = _str(payload.get("prompt"))
             if policy.is_task_notification(prompt):
                 return _blocked_notification()
-            if caller.kind is CallerKind.MAIN:
-                ctx.state_factory().record_human_input(prompt)
-            return {}
+            if caller.kind is not CallerKind.MAIN:
+                return {}
+            return _human_input_output(ctx.state_factory().handle_human_input(prompt))
         case _:
+            return {}
+
+
+def _human_input_output(outcome: HumanInputOutcome) -> dict[str, Any]:
+    match outcome.kind:
+        case HumanInputKind.SUBMITTED:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": outcome.message,
+                }
+            }
+        case HumanInputKind.INFO | HumanInputKind.REJECTED:
+            # Answered straight to the human; the driver model is never invoked.
+            return {"decision": "block", "reason": outcome.message}
+        case HumanInputKind.PASSTHROUGH:
             return {}
 
 

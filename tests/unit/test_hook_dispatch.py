@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from mafia.harness.ports import HarnessState
+from mafia.harness.ports import HarnessState, HumanInputKind, HumanInputOutcome
 from mafia.hosts.claude_code.hooks.dispatch import HookContext, HookMode, read_mode, run
 from tests.conftest import FakeState
 
@@ -41,7 +41,10 @@ class BrokenState:
     def is_awaiting(self, agent_type: str) -> bool:
         raise RuntimeError("db down")
 
-    def record_human_input(self, text: str) -> None:
+    def record_agent_finished(self, agent_type: str) -> None:
+        raise RuntimeError("db down")
+
+    def handle_human_input(self, text: str) -> HumanInputOutcome:
         raise RuntimeError("db down")
 
 
@@ -151,3 +154,32 @@ def test_task_notification_blocked_even_if_state_broken() -> None:
     out = call({"hook_event_name": "UserPromptSubmit", "prompt": prompt}, ctx(BrokenState()))
     assert out["decision"] == "block"
     assert out["hookSpecificOutput"]["suppressOriginalPrompt"] is True
+
+
+@pytest.mark.parametrize("kind", [HumanInputKind.INFO, HumanInputKind.REJECTED])
+def test_info_and_rejection_answered_to_human_without_model(kind: HumanInputKind) -> None:
+    state = FakeState(outcome=HumanInputOutcome(kind, "당신의 역할: 시민"))
+    out = call({"hook_event_name": "UserPromptSubmit", "prompt": ":role"}, ctx(state))
+    assert out == {"decision": "block", "reason": "당신의 역할: 시민"}
+
+
+def test_submitted_human_action_tells_driver_to_advance() -> None:
+    state = FakeState(outcome=HumanInputOutcome(HumanInputKind.SUBMITTED, "advance 하세요"))
+    out = call({"hook_event_name": "UserPromptSubmit", "prompt": "저는 시민입니다"}, ctx(state))
+    assert out["hookSpecificOutput"]["additionalContext"] == "advance 하세요"
+    assert "decision" not in out
+
+
+def test_subagent_prompts_are_not_human_input(state: FakeState) -> None:
+    payload = {"hook_event_name": "UserPromptSubmit", "prompt": "hi", "agent_type": "seat-3"}
+    assert call(payload, ctx(state)) == {}
+    assert state.human_inputs == []
+
+
+def test_finished_run_recorded_only_when_stop_allowed() -> None:
+    state = FakeState(awaiting={"seat-3"})
+    payload = {"hook_event_name": "SubagentStop", "agent_type": "seat-3", "stop_hook_active": False}
+    call(payload, ctx(state))
+    assert state.finished == []  # blocked: must submit first
+    call({**payload, "stop_hook_active": True}, ctx(state))
+    assert state.finished == ["seat-3"]

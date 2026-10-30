@@ -16,6 +16,8 @@ def _setup(args: argparse.Namespace) -> int:
     mode_file = paths.runs_dir() / "harness_mode"
     mode_file.parent.mkdir(parents=True, exist_ok=True)
     mode_file.write_text(args.mode + "\n", encoding="utf-8")
+    backend = "spike" if args.spike else "game"
+    (paths.runs_dir() / "harness_backend").write_text(backend + "\n", encoding="utf-8")
     for path in written:
         print(f"wrote {path}")
     print(f"harness mode: {args.mode} ({mode_file})")

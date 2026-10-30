@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from mcp.server.mcpserver import MCPServer
 
-from mafia.hosts.claude_code import MCP_SERVER_NAME
+from mafia.harness.tools import MCP_SERVER_NAME
 from mafia.hosts.claude_code.spike.state import SpikeState
 
 server = MCPServer(MCP_SERVER_NAME, instructions="mafia-with-ai M0 harness spike")

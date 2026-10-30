@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from mafia.agents import MYSTERY_AGENTS
-from mafia.harness.tools import AGENT_TOOLS
+from mafia.harness.tools import AGENT_TOOLS, SEAT_TOOLS
 from mafia.hosts.claude_code.workspace import GENERATED_MARKER, write_workspace
 
 
@@ -24,7 +24,9 @@ def test_generates_all_agents_with_scoped_tools(tmp_path: Path) -> None:
         assert fm["omitClaudeMd"] == "true"
     for seat in (1, 2):
         fm = _frontmatter((agents / f"seat-{seat}.md").read_text(encoding="utf-8"))
-        assert fm["tools"] == "mcp__mafia__my_turn, mcp__mafia__submit_speech"
+        assert {t.strip() for t in fm["tools"].split(",")} == {
+            f"mcp__mafia__{t}" for t in SEAT_TOOLS
+        }
 
 
 def test_agent_bodies_come_from_neutral_prompts(tmp_path: Path) -> None:
@@ -51,3 +53,26 @@ def test_stale_generated_agents_removed_but_user_files_kept(tmp_path: Path) -> N
     write_workspace(tmp_path, spike=True, python=Path("/py/bin/python"))
     assert not (agents / "seat-7.md").exists()
     assert (agents / "mine.md").exists()
+
+
+def test_game_workspace_has_eight_seats_skill_and_driver(tmp_path: Path) -> None:
+    write_workspace(tmp_path, spike=False, python=Path("/py/bin/python"))
+    agents = tmp_path / ".claude" / "agents"
+    seats = sorted(p.stem for p in agents.glob("seat-*.md"))
+    assert seats == [f"seat-{i}" for i in range(1, 9)]
+    seat_text = (agents / "seat-5.md").read_text(encoding="utf-8")
+    assert "my_turn" in seat_text and "제출 완료" in seat_text
+    assert _frontmatter(seat_text)["omitClaudeMd"] == "true"
+    skill = (tmp_path / ".claude" / "skills" / "mafia" / "SKILL.md").read_text(encoding="utf-8")
+    assert _frontmatter(skill)["name"] == "mafia"
+    assert "진행 루프" in (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    mcp = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
+    assert mcp["mcpServers"]["mafia"]["args"] == ["-m", "mafia.mcp_server.server"]
+
+
+def test_switching_back_to_spike_removes_game_only_files(tmp_path: Path) -> None:
+    write_workspace(tmp_path, spike=False, python=Path("/py/bin/python"))
+    write_workspace(tmp_path, spike=True, python=Path("/py/bin/python"))
+    agents = tmp_path / ".claude" / "agents"
+    assert sorted(p.stem for p in agents.glob("seat-*.md")) == ["seat-1", "seat-2"]
+    assert not (tmp_path / ".claude" / "skills" / "mafia" / "SKILL.md").exists()

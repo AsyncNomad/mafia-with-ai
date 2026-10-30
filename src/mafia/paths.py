@@ -27,5 +27,13 @@ def logs_dir() -> Path:
     return runs_dir() / "logs"
 
 
+def config_dir() -> Path:
+    return Path(os.environ.get("MAFIA_CONFIG_DIR", REPO_ROOT / "config"))
+
+
+def game_db_path() -> Path:
+    return runs_dir() / "game.db"
+
+
 def prompts_dir() -> Path:
     return Path(__file__).resolve().parent / "prompts"
