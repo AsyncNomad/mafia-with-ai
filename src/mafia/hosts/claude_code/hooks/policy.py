@@ -24,6 +24,8 @@ from mafia.hosts.claude_code import MCP_TOOL_PREFIX
 
 # Claude Code's subagent tool. "Task" is the older name; both are treated identically.
 SPAWN_TOOLS = frozenset({"Agent", "Task"})
+# The report tool a background subagent must call to finish (VSCode extension, observed M2).
+HANDBACK_TOOLS = frozenset({"SubagentHandback"})
 # Loads deferred tool schemas. Reveals nothing about the game, and MCP tools may be deferred.
 SCHEMA_TOOLS = frozenset({"ToolSearch"})
 MAIN_SKILLS = frozenset({"mafia"})
@@ -73,6 +75,8 @@ def decide_pre_tool_use(
 ) -> Decision:
     if tool_name in SCHEMA_TOOLS:
         return Allow("tool schema lookup")
+    if tool_name in HANDBACK_TOOLS and caller.kind in (CallerKind.SEAT, CallerKind.AGENT):
+        return _decide_handback(caller, tool_input, state)
     match caller.kind:
         case CallerKind.MAIN:
             return _decide_main(tool_name, tool_input, state)
@@ -109,6 +113,18 @@ def _decide_main(tool_name: str, tool_input: Mapping[str, Any], state: HarnessSt
         return Allow("game skill")
 
     return Deny("이 워크스페이스에서 진행자는 게임 진행 도구만 쓸 수 있습니다.")
+
+
+def _decide_handback(
+    caller: Caller, tool_input: Mapping[str, Any], state: HarnessState
+) -> Decision:
+    """Background subagents must end through a report tool. The report is the only channel
+    from an agent back to the driver, so its content is replaced, never passed through."""
+    if caller.agent_type and state.needs_submission(caller.agent_type):
+        return Deny("아직 행동을 제출하지 않았습니다. 지침에서 요구한 제출 도구를 먼저 호출하세요.")
+    updated = {k: v for k, v in tool_input.items() if k != "message"}
+    updated["message"] = HANDBACK
+    return Allow("handback sealed", updated)
 
 
 def _decide_seat(caller: Caller, tool_name: str, tool_input: Mapping[str, Any]) -> Decision:

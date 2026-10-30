@@ -123,7 +123,7 @@ def _blocked_notification() -> dict[str, Any]:
     """Subagent results must never reach the main session; it learns progress via `advance`."""
     return {
         "decision": "block",
-        "reason": "에이전트 차례가 끝났습니다.",
+        "reason": "(AI 차례 진행 중)",
         "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True},
     }
 

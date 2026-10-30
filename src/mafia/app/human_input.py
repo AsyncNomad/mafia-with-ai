@@ -24,6 +24,7 @@ class Command(StrEnum):
     LOG = "log"
     HELP = "help"
     SHOW = "show"
+    ASK = "ask"  # a question for the driver, never game input
     UNKNOWN = "unknown"
     SPEECH = "speech"  # free text
 
@@ -38,6 +39,8 @@ _ALIASES: dict[str, Command] = {
     ":go": Command.VOTE,
     ":조사": Command.VOTE,
     ":show": Command.SHOW,
+    ":ask": Command.ASK,
+    ":질문": Command.ASK,
     ":공개": Command.SHOW,
     ":yes": Command.YES,
     ":찬성": Command.YES,
@@ -63,7 +66,8 @@ HELP_TEXT = """\
 - `:yes` / `:no` — 찬반 투표
 - `:who` — 생존자와 현재 단계
 - `:role` — 내 역할 다시 보기
-- `:log` — 최근 기록 다시 보기"""
+- `:log` — 최근 기록 다시 보기
+- `:ask 질문` — 진행자에게 묻기 (내 차례에 그냥 쓰는 말은 모두 발언으로 제출됩니다)"""
 
 
 @dataclass(frozen=True, slots=True)

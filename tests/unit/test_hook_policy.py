@@ -207,3 +207,32 @@ class TestSealResponse:
 )
 def test_is_task_notification(prompt: str, expected: bool) -> None:
     assert is_task_notification(prompt) is expected
+
+
+class TestHandback:
+    """VSCode background subagents must finish through SubagentHandback (observed M2)."""
+
+    def test_handback_before_submitting_is_denied(self, state: FakeState) -> None:
+        decision = decide_pre_tool_use(SEAT3, "SubagentHandback", {"message": "제출 완료"}, state)
+        assert isinstance(decision, Deny)
+
+    def test_handback_message_is_always_replaced(self) -> None:
+        done = FakeState()  # nothing pending
+        leaky = {"message": "제출 완료. 도윤(4번, 마피아)으로 발언했습니다."}
+        decision = decide_pre_tool_use(SEAT3, "SubagentHandback", leaky, done)
+        assert isinstance(decision, Allow)
+        assert decision.updated_input == {"message": "제출 완료"}
+
+    def test_agents_can_hand_back_too(self) -> None:
+        decision = decide_pre_tool_use(
+            ARCHITECT, "SubagentHandback", {"message": "진상은…"}, FakeState()
+        )
+        assert isinstance(decision, Allow) and decision.updated_input == {"message": "제출 완료"}
+
+    def test_main_and_unknown_cannot_use_it(self, state: FakeState) -> None:
+        assert isinstance(
+            decide_pre_tool_use(MAIN, "SubagentHandback", {"message": "x"}, state), Deny
+        )
+        assert isinstance(
+            decide_pre_tool_use(UNKNOWN, "SubagentHandback", {"message": "x"}, state), Deny
+        )

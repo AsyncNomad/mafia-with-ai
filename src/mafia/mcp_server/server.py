@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import threading
+import time
 import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -13,7 +14,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 
 from mafia import paths
-from mafia.app.table import NoActiveGame, TableApp
+from mafia.app.table import AdvanceResult, NoActiveGame, TableApp
 from mafia.engine.requests import Answer
 from mafia.harness.tools import MCP_SERVER_NAME
 
@@ -58,7 +59,7 @@ def _guard(fn: Callable[[], str]) -> str:
 
 
 # --- driver -------------------------------------------------------------------------------
-@server.tool()
+@server.tool(structured_output=False)
 def new_game(human_name: str = "나", watch: bool = False, mode: str = "original") -> str:
     """새 게임을 시작한다. mode: "original"(마피아) 또는 "mystery"(머더 미스터리).
     human_name: 사람 플레이어 이름. watch=true면 AI 8명끼리 하는 관전 모드.
@@ -66,19 +67,37 @@ def new_game(human_name: str = "나", watch: bool = False, mode: str = "original
     return _guard(lambda: app().new_game(mode=mode, human_name=human_name, watch=watch).to_text())
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def advance() -> str:
-    """게임을 진행하고, 사람에게 보여 줄 새 내용(<display>)과 다음 할 일(<next>)을 돌려준다."""
-    return _guard(lambda: app().advance().to_text())
+    """게임을 진행하고, 사람에게 보여 줄 새 내용(<display>)과 다음 할 일(<next>)을 돌려준다.
+    AI들이 아직 작업 중이면 최대 40초까지 기다렸다가 돌려준다."""
+    return _guard(lambda: _advance_waiting().to_text())
 
 
-@server.tool()
+WAIT_LIMIT_SECONDS = 40.0
+WAIT_POLL_SECONDS = 1.0
+
+
+def _advance_waiting() -> AdvanceResult:
+    """Long-poll while background agents run, so progress never depends on host notifications."""
+    deadline = time.monotonic() + WAIT_LIMIT_SECONDS
+    result = app().advance()
+    shown = [result.display] if result.display else []
+    while result.next.type == "wait" and time.monotonic() < deadline:
+        time.sleep(WAIT_POLL_SECONDS)
+        result = app().advance()
+        if result.display:
+            shown.append(result.display)
+    return AdvanceResult("\n\n".join(shown), result.next)
+
+
+@server.tool(structured_output=False)
 def status() -> str:
     """현재 일차, 단계, 생존자(공개 정보)."""
     return _guard(lambda: app().status())
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def prepare_mystery(request: str = "") -> str:
     """머더 미스터리 시나리오를 새로 준비한다(설계 → 감수 → 블라인드 풀이 → 판정).
     request: 플레이어가 원하는 배경·분위기(없으면 무작위). 이후 advance 루프를 그대로 따른다."""
@@ -86,19 +105,19 @@ def prepare_mystery(request: str = "") -> str:
 
 
 # --- mystery pipeline agents (caller is injected by the harness) ---------------------------
-@server.tool()
+@server.tool(structured_output=False)
 def mystery_brief(caller: str = "") -> str:
     """설계 브리프와 섹션별 JSON 스키마."""
     return _guard(lambda: app().prep().architect_brief(caller))
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def mystery_revision_packet(caller: str = "") -> str:
     """수정 차수일 때: 이전 초안, 불합격 사유, 감수 보고서, 블라인드 풀이 결과."""
     return _guard(lambda: app().prep().revision_packet(caller))
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def mystery_submit_section(
     section: str, payload: dict[str, Any] | list[Any], caller: str = ""
 ) -> str:
@@ -106,44 +125,44 @@ def mystery_submit_section(
     return _guard(lambda: app().prep().submit_section(caller, section, payload))
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def mystery_check(caller: str = "") -> str:
     """제출된 초안 전체를 조립해 정적 검증을 돌린다. 오류가 0이어야 다음 단계로 간다."""
     return _guard(lambda: app().prep().check(caller))
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def mystery_review_packet(stage: str = "blind", caller: str = "") -> str:
     """감수 자료. stage=blind: 플레이어가 보는 것만, stage=full: 진상 포함 전체."""
     return _guard(lambda: app().prep().review_packet(caller, stage))
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def mystery_submit_audit(audit: dict[str, Any], caller: str = "") -> str:
     """감수 보고서 제출: {verdict, findings[], blind_attempt, summary}."""
     return _guard(lambda: app().prep().submit_audit(caller, audit))
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def mystery_solver_packet(caller: str = "") -> str:
     """풀이 작업 하나를 맡고, 그 작업의 공개 정보와 카드를 받는다."""
     return _guard(lambda: app().prep().solver_packet(caller))
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def mystery_submit_solution(job_id: str, solution: dict[str, Any], caller: str = "") -> str:
     """풀이 제출: {culprit, confidence, reasoning, suspects, confusions}."""
     return _guard(lambda: app().prep().submit_solution(caller, job_id, solution))
 
 
 # --- seats --------------------------------------------------------------------------------
-@server.tool()
+@server.tool(structured_output=False)
 def my_turn(seat: int) -> str:
     """당신(좌석)이 지금 알 수 있는 모든 것과 지금 할 일. 매 차례 가장 먼저 호출한다."""
     return _guard(lambda: app().seat_turn(seat))
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def submit_speech(
     seat: int,
     speech: str | None = None,
@@ -165,7 +184,7 @@ def submit_speech(
     )
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def submit_target(
     seat: int,
     target: int | None = None,
@@ -180,7 +199,7 @@ def submit_target(
     )
 
 
-@server.tool()
+@server.tool(structured_output=False)
 def submit_approval(
     seat: int,
     approve: bool | None = None,

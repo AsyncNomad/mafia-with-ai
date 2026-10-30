@@ -15,7 +15,7 @@ from mafia.views.narration import name_lookup, narrate
 SEAT_MARKS = ("🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "🟫", "⬜")
 
 HUMAN_HOW_TO: Mapping[Answer, str] = {
-    Answer.SPEECH: "채팅창에 그대로 말하면 발언이 됩니다. 패스는 `:pass`",
+    Answer.SPEECH: "채팅창에 쓰는 말은 그대로 발언으로 제출됩니다. 패스는 `:pass`, 진행자에게 물을 땐 `:ask 질문`",
     Answer.TARGET: "`:vote 이름` 또는 `:vote 번호`로 고르세요. 기권은 `:pass`",
     Answer.APPROVAL: "`:yes`(찬성) / `:no`(반대) / `:pass`(기권)",
 }

@@ -362,6 +362,8 @@ class TableApp:
         request = self._request_for(loaded, human)
 
         match parsed.command:
+            case Command.ASK:
+                return HumanInputOutcome(HumanInputKind.PASSTHROUGH)
             case Command.HELP:
                 return _info(HELP_TEXT)
             case Command.WHO:

@@ -53,7 +53,50 @@ def test_every_tool_body_is_guarded() -> None:
     import re
 
     source = inspect.getsource(server)
-    bodies = re.findall(r"@server\.tool\(\)\ndef (\w+)\((?:.|\n)*?\n    return (.*)", source)
+    bodies = re.findall(r"@server\.tool\([^)]*\)\ndef (\w+)\((?:.|\n)*?\n    return (.*)", source)
     assert len(bodies) >= 16
     for name, body in bodies:
         assert body.startswith("_guard("), f"{name} is not guarded: {body}"
+
+
+def test_advance_long_polls_while_agents_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mafia.app.table import AdvanceResult, Next
+
+    script = [
+        AdvanceResult('- [도윤] "안녕하세요"', Next("wait")),
+        AdvanceResult("", Next("wait")),
+        AdvanceResult('- [민지] "반가워요"', Next("human")),
+    ]
+
+    class Fake:
+        def advance(self) -> AdvanceResult:
+            return script.pop(0)
+
+    fake = Fake()
+    monkeypatch.setattr(server, "app", lambda: fake)
+    monkeypatch.setattr(server, "WAIT_POLL_SECONDS", 0.0)
+    out = server.advance()
+    assert "도윤" in out and "민지" in out  # everything shown while waiting is kept
+    assert '"type": "human"' in out
+    assert not script
+
+
+def test_advance_gives_up_waiting_after_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mafia.app.table import AdvanceResult, Next
+
+    class Stuck:
+        def advance(self) -> AdvanceResult:
+            return AdvanceResult("", Next("wait"))
+
+    stuck = Stuck()
+    monkeypatch.setattr(server, "app", lambda: stuck)
+    monkeypatch.setattr(server, "WAIT_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(server, "WAIT_LIMIT_SECONDS", 0.05)
+    assert '"type": "wait"' in server.advance()
+
+
+def test_tool_results_are_plain_text_for_the_driver() -> None:
+    import inspect
+
+    source = inspect.getsource(server)
+    assert source.count("@server.tool(structured_output=False)") == source.count("@server.tool(")

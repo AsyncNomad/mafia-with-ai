@@ -195,6 +195,14 @@ class TestHumanInput:
             app.handle_human_input(":pass")
         raise AssertionError("no target request for the human")
 
+    def test_ask_is_never_a_speech(self, app: TableApp) -> None:
+        app.new_game(seed="ask")
+        self._until_human_turn(app, random.Random(2))
+        before = len(app.service.load(app.game_id()).log)
+        outcome = app.handle_human_input(":ask 지금 게임 진행 중인 거 맞아?")
+        assert outcome.kind is HumanInputKind.PASSTHROUGH
+        assert len(app.service.load(app.game_id()).log) == before  # nothing was submitted
+
     def test_chat_outside_the_humans_turn_passes_through(self, app: TableApp) -> None:
         result = app.new_game(seed="chat")
         if result.next.type == "wake":
