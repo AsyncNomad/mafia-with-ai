@@ -48,6 +48,25 @@ MIGRATIONS: Sequence[str] = (
         PRIMARY KEY (game_id, viewer)
     );
     """,
+    # 3: murder-mystery scenario library and preparation jobs
+    """
+    CREATE TABLE scenarios (
+        scenario_id TEXT PRIMARY KEY,
+        status      TEXT NOT NULL CHECK (status IN ('verified', 'rejected', 'played')),
+        created_at  REAL NOT NULL,
+        title       TEXT NOT NULL,
+        tone        TEXT NOT NULL,
+        brief       TEXT NOT NULL,
+        scenario    TEXT,
+        report      TEXT NOT NULL
+    );
+    CREATE TABLE prep_jobs (
+        job_id     TEXT PRIMARY KEY,
+        active     INTEGER NOT NULL CHECK (active IN (0, 1)),
+        state      TEXT NOT NULL,
+        updated_at REAL NOT NULL
+    );
+    """,
 )
 
 

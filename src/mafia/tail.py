@@ -172,3 +172,28 @@ def run(view: View, *, game_id: str | None, follow: bool, interval: float = 0.5)
             time.sleep(interval)
     except KeyboardInterrupt:
         return 0
+
+
+def list_scenarios(*, spoil: bool) -> int:
+    from mafia.modes.mystery.scenario import Scenario
+    from mafia.store.scenarios import ScenarioStore
+
+    store = ScenarioStore(connect(paths.game_db_path()))
+    console = Console()
+    table = Table("시나리오", "제목", "톤", "상태", "수정 차수")
+    records = store.list()
+    for r in records:
+        status = {"verified": "준비 완료", "played": "플레이함", "rejected": "폐기"}.get(
+            r.status, r.status
+        )
+        table.add_row(r.scenario_id, r.title, r.tone, status, str(r.report.get("revisions", "")))
+    console.print(table)
+    if spoil:
+        for r in records:
+            if r.scenario is None:
+                continue
+            s = Scenario.model_validate(r.scenario)
+            culprit = s.character(s.truth.culprit_id)
+            console.rule(Text(f"{r.title} · 진상", style="bold red"))
+            console.print(Text(f"범인: {culprit.name} ({culprit.occupation})\n{s.truth.summary}"))
+    return 0

@@ -263,3 +263,25 @@ def test_postmortem_appears_once_when_the_game_ends(tmp_path: Path) -> None:
     assert "밤마다 실제로 일어난 일" in final
     assert "각자의 마지막 속마음" in final
     assert "## 🔍 복기" not in app.advance().display  # not repeated
+
+
+def test_preparation_takes_over_advance_until_done(tmp_path: Path) -> None:
+    from mafia.app.prep import PrepService
+    from mafia.store.scenarios import ScenarioStore
+
+    conn = connect(tmp_path / "game.db")
+    clock = FixedClock()
+    app = TableApp(
+        GameService(EventStore(conn), clock),
+        HarnessStore(conn),
+        clock,
+        load_personas(),
+        preparation=PrepService(ScenarioStore(conn), clock),
+    )
+    result = app.prepare_mystery("남극 기지")
+    assert result.next.type == "wake" and result.next.agents == ("mystery-architect",)
+    assert "설계" in result.display
+    assert app.is_awaiting("mystery-architect")
+    assert not app.is_awaiting("mystery-auditor")
+    assert not app.is_awaiting("seat-1")  # no game is running
+    assert app.advance().next.agents == ("mystery-architect",)  # still designing

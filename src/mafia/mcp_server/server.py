@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable
+from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
@@ -26,7 +27,7 @@ def app() -> TableApp:
 def _guard(fn: Callable[[], str]) -> str:
     try:
         return fn()
-    except NoActiveGame as exc:
+    except (NoActiveGame, PermissionError, LookupError) as exc:
         return str(exc)
 
 
@@ -48,6 +49,64 @@ def advance() -> str:
 def status() -> str:
     """현재 일차, 단계, 생존자(공개 정보)."""
     return _guard(app().status)
+
+
+@server.tool()
+def prepare_mystery(request: str = "") -> str:
+    """머더 미스터리 시나리오를 새로 준비한다(설계 → 감수 → 블라인드 풀이 → 판정).
+    request: 플레이어가 원하는 배경·분위기(없으면 무작위). 이후 advance 루프를 그대로 따른다."""
+    return _guard(lambda: app().prepare_mystery(request).to_text())
+
+
+# --- mystery pipeline agents (caller is injected by the harness) ---------------------------
+@server.tool()
+def mystery_brief(caller: str = "") -> str:
+    """설계 브리프와 섹션별 JSON 스키마."""
+    return _guard(lambda: app().prep().architect_brief(caller))
+
+
+@server.tool()
+def mystery_revision_packet(caller: str = "") -> str:
+    """수정 차수일 때: 이전 초안, 불합격 사유, 감수 보고서, 블라인드 풀이 결과."""
+    return _guard(lambda: app().prep().revision_packet(caller))
+
+
+@server.tool()
+def mystery_submit_section(
+    section: str, payload: dict[str, Any] | list[Any], caller: str = ""
+) -> str:
+    """시나리오 섹션 하나를 제출한다. facts/characters/clues는 배열, 나머지는 객체."""
+    return _guard(lambda: app().prep().submit_section(caller, section, payload))
+
+
+@server.tool()
+def mystery_check(caller: str = "") -> str:
+    """제출된 초안 전체를 조립해 정적 검증을 돌린다. 오류가 0이어야 다음 단계로 간다."""
+    return _guard(lambda: app().prep().check(caller))
+
+
+@server.tool()
+def mystery_review_packet(stage: str = "blind", caller: str = "") -> str:
+    """감수 자료. stage=blind: 플레이어가 보는 것만, stage=full: 진상 포함 전체."""
+    return _guard(lambda: app().prep().review_packet(caller, stage))
+
+
+@server.tool()
+def mystery_submit_audit(audit: dict[str, Any], caller: str = "") -> str:
+    """감수 보고서 제출: {verdict, findings[], blind_attempt, summary}."""
+    return _guard(lambda: app().prep().submit_audit(caller, audit))
+
+
+@server.tool()
+def mystery_solver_packet(caller: str = "") -> str:
+    """풀이 작업 하나를 맡고, 그 작업의 공개 정보와 카드를 받는다."""
+    return _guard(lambda: app().prep().solver_packet(caller))
+
+
+@server.tool()
+def mystery_submit_solution(job_id: str, solution: dict[str, Any], caller: str = "") -> str:
+    """풀이 제출: {culprit, confidence, reasoning, suspects, confusions}."""
+    return _guard(lambda: app().prep().submit_solution(caller, job_id, solution))
 
 
 # --- seats --------------------------------------------------------------------------------

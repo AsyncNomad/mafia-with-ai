@@ -12,7 +12,13 @@ from typing import Any, cast
 
 from mafia.harness.identity import Caller, CallerKind
 from mafia.harness.ports import HarnessState
-from mafia.harness.tools import AGENT_TOOLS, PUBLIC_TOOLS, SEAT_ARGUMENT, SEAT_TOOLS
+from mafia.harness.tools import (
+    AGENT_TOOLS,
+    CALLER_ARGUMENT,
+    PUBLIC_TOOLS,
+    SEAT_ARGUMENT,
+    SEAT_TOOLS,
+)
 from mafia.hosts.claude_code import MCP_TOOL_PREFIX
 
 # Claude Code's subagent tool. "Task" is the older name; both are treated identically.
@@ -72,7 +78,7 @@ def decide_pre_tool_use(
         case CallerKind.SEAT:
             return _decide_seat(caller, tool_name, tool_input)
         case CallerKind.AGENT:
-            return _decide_agent(caller, tool_name)
+            return _decide_agent(caller, tool_name, tool_input)
         case CallerKind.UNKNOWN:
             return Deny(
                 f"알 수 없는 에이전트({caller.agent_type})는 이 워크스페이스에서 도구를 쓸 수 없습니다."
@@ -113,11 +119,13 @@ def _decide_seat(caller: Caller, tool_name: str, tool_input: Mapping[str, Any]) 
     return Deny("플레이어는 자기 게임 도구만 쓸 수 있습니다.")
 
 
-def _decide_agent(caller: Caller, tool_name: str) -> Decision:
+def _decide_agent(caller: Caller, tool_name: str, tool_input: Mapping[str, Any]) -> Decision:
     short = mcp_short_name(tool_name)
     allowed = AGENT_TOOLS.get(caller.agent_type or "", frozenset())
     if short is not None and short in allowed:
-        return Allow("agent tool family")
+        updated = dict(tool_input)
+        updated[CALLER_ARGUMENT] = caller.agent_type  # identity from the harness, never the model
+        return Allow("agent tool family; caller bound", updated)
     return Deny(f"{caller.agent_type}에게 허용되지 않은 도구입니다.")
 
 

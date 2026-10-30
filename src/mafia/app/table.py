@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from mafia import paths
 from mafia.app.human_input import HELP_TEXT, Command, parse, resolve_seat
+from mafia.app.prep import PrepService, Stage, StartGame
 from mafia.engine.core_events import ContextDelivered, GameEnded, SeatInfo
 from mafia.engine.events import Event
 from mafia.engine.requests import Action, ActionRejected, Answer, SeatRequest
@@ -29,6 +30,7 @@ from mafia.service import GameService, Loaded
 from mafia.store.db import connect
 from mafia.store.events import EventStore
 from mafia.store.harness import HarnessStore
+from mafia.store.scenarios import ScenarioStore
 from mafia.views.chat_md import render_events, render_human_request, render_role_card
 from mafia.views.narration import PHASE_LABELS, name_lookup
 from mafia.views.postmortem import render_postmortem
@@ -70,12 +72,43 @@ class TableApp:
     harness: HarnessStore
     clock: Clock = field(default_factory=SystemClock)
     personas: tuple[Persona, ...] | None = None
+    preparation: PrepService | None = None
 
     @classmethod
     def open_default(cls) -> TableApp:
         conn = connect(paths.game_db_path())
         clock = SystemClock()
-        return cls(GameService(EventStore(conn), clock), HarnessStore(conn), clock)
+        return cls(
+            GameService(EventStore(conn), clock),
+            HarnessStore(conn),
+            clock,
+            preparation=PrepService(ScenarioStore(conn), clock),
+        )
+
+    def prep(self) -> PrepService:
+        if self.preparation is None:
+            raise LookupError("이 테이블에는 시나리오 준비 기능이 없습니다.")
+        return self.preparation
+
+    # --- murder-mystery preparation -----------------------------------------------------
+    def prepare_mystery(
+        self, request: str = "", start_game: StartGame | None = None
+    ) -> AdvanceResult:
+        self.prep().start(request, start_game)
+        return self.advance()
+
+    def _advance_preparation(self) -> AdvanceResult | None:
+        if self.preparation is None or self.preparation.active() is None:
+            return None
+        progress = self.preparation.advance()
+        if progress.agents:
+            return AdvanceResult(
+                progress.display, Next("wake", progress.agents, parallel=len(progress.agents) > 1)
+            )
+        tail = ""
+        if progress.stage is Stage.VERIFIED:
+            tail = "\n\n시나리오가 라이브러리에 저장되었습니다. 머더 미스터리 게임은 곧 지원됩니다."
+        return AdvanceResult(progress.display + tail, Next("ended"))
 
     # --- driver (main session) ----------------------------------------------------------
     def new_game(
@@ -109,6 +142,9 @@ class TableApp:
         return self.advance()
 
     def advance(self) -> AdvanceResult:
+        preparing = self._advance_preparation()
+        if preparing is not None:
+            return preparing
         game_id = self.game_id()
         self.service.advance(game_id)
         self._expire_abandoned(game_id)
@@ -203,8 +239,10 @@ class TableApp:
     # --- HarnessState (hooks) -----------------------------------------------------------
     def is_awaiting(self, agent_type: str) -> bool:
         caller = classify(agent_type, KNOWN_AGENTS)
+        if caller.kind is CallerKind.AGENT:
+            return self.preparation is not None and self.preparation.is_awaiting(agent_type)
         if caller.kind is not CallerKind.SEAT or caller.seat is None:
-            return False  # mystery agents arrive with the murder-mystery mode (M4)
+            return False
         try:
             loaded = self.service.load(self.game_id())
         except NoActiveGame:

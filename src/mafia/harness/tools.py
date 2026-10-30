@@ -16,6 +16,7 @@ PUBLIC_TOOLS: frozenset[str] = frozenset(
         "new_game",
         "advance",
         "status",
+        "prepare_mystery",
         "ping",  # M0 spike only
         "spike_arm",  # M0 spike only
     }
@@ -38,9 +39,12 @@ AGENT_TOOLS: Mapping[str, frozenset[str]] = {
     ),
     "mystery-auditor": frozenset({"mystery_review_packet", "mystery_submit_audit"}),
     "mystery-solver": frozenset({"mystery_solver_packet", "mystery_submit_solution"}),
+    "mystery-solver-quick": frozenset({"mystery_solver_packet", "mystery_submit_solution"}),
     "mystery-narrator": frozenset({"narration_packet", "submit_narration"}),
 }
 
 KNOWN_AGENTS: frozenset[str] = frozenset(AGENT_TOOLS)
 
 SEAT_ARGUMENT = "seat"
+# Injected into every agent-family tool call so the server knows which agent is calling.
+CALLER_ARGUMENT = "caller"

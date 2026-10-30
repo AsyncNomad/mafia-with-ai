@@ -53,6 +53,12 @@ def _replay(args: argparse.Namespace) -> int:
     return replay(View(god=args.god, seat=args.seat), game_id=args.game, speed=args.speed)
 
 
+def _scenarios(args: argparse.Namespace) -> int:
+    from mafia.tail import list_scenarios
+
+    return list_scenarios(spoil=args.spoil)
+
+
 def _games(_: argparse.Namespace) -> int:
     from mafia.tail import list_games
 
@@ -83,6 +89,10 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--game", default=None, help="game id (default: the active game)")
     rep.add_argument("--speed", type=float, default=1.0, help="2 = twice as fast, 0 = instant")
     rep.set_defaults(func=_replay)
+
+    scen = sub.add_parser("scenarios", help="list murder-mystery scenarios in the library")
+    scen.add_argument("--spoil", action="store_true", help="also print each scenario's solution")
+    scen.set_defaults(func=_scenarios)
 
     games = sub.add_parser("games", help="list stored games")
     games.set_defaults(func=_games)

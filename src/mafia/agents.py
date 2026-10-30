@@ -26,13 +26,15 @@ class AgentSpec:
     tier: ModelTier
     effort: str
     max_turns: int
+    prompt_name: str = ""  # defaults to `name`; variants of one agent may share a prompt
 
     @property
     def tools(self) -> tuple[str, ...]:
         return tuple(sorted(AGENT_TOOLS[self.name]))
 
     def prompt(self) -> str:
-        return (paths.prompts_dir() / "agents" / f"{self.name}.md").read_text(encoding="utf-8")
+        name = self.prompt_name or self.name
+        return (paths.prompts_dir() / "agents" / f"{name}.md").read_text(encoding="utf-8")
 
 
 _ONLY_ON_REQUEST = (
@@ -60,6 +62,14 @@ MYSTERY_AGENTS: tuple[AgentSpec, ...] = (
         tier=ModelTier.BALANCED,
         effort="medium",
         max_turns=8,
+    ),
+    AgentSpec(
+        name="mystery-solver-quick",
+        description=f"1라운드 카드만으로 푸는 블라인드 탐정(난이도 하한 측정). {_ONLY_ON_REQUEST}",
+        tier=ModelTier.FAST,
+        effort="low",
+        max_turns=8,
+        prompt_name="mystery-solver",
     ),
     AgentSpec(
         name="mystery-narrator",

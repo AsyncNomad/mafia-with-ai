@@ -38,7 +38,7 @@
 
 ## 제출 내용
 
-`mystery_submit_solution`으로 다음을 제출합니다.
+`mystery_submit_solution`에 `job_id`(패킷 맨 위의 작업 번호)와 `solution` 객체를 넣어 제출합니다. `solution`에 들어갈 내용은 다음과 같습니다.
 
 | 필드 | 내용 |
 |---|---|

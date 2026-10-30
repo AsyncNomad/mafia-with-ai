@@ -124,9 +124,13 @@ class TestSeat:
 
 class TestAgentsAndUnknown:
     def test_agent_uses_only_its_family(self, state: FakeState) -> None:
-        assert isinstance(
-            decide_pre_tool_use(ARCHITECT, "mcp__mafia__mystery_brief", {}, state), Allow
+        decision = decide_pre_tool_use(
+            ARCHITECT, "mcp__mafia__mystery_brief", {"caller": "mystery-auditor"}, state
         )
+        assert isinstance(decision, Allow)
+        assert decision.updated_input == {
+            "caller": "mystery-architect"
+        }  # forged caller overwritten
         assert isinstance(
             decide_pre_tool_use(ARCHITECT, "mcp__mafia__mystery_submit_audit", {}, state), Deny
         )

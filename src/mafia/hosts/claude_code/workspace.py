@@ -128,7 +128,7 @@ def render_skill() -> str:
         f"# {GENERATED_MARKER}\n"
         "name: mafia\n"
         "description: 마피아 게임을 시작하거나 이어 간다 (new / watch / continue / status).\n"
-        'argument-hint: "[new [이름] | watch | continue | status]"\n'
+        'argument-hint: "[new [이름] | watch | prepare [요청] | continue | status]"\n'
         "---\n\n" + body.strip() + "\n"
     )
 
