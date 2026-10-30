@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from mafia.harness.identity import Caller, CallerKind, classify
 from mafia.harness.ports import HarnessState, HumanInputKind, HumanInputOutcome
 from mafia.harness.tools import KNOWN_AGENTS
 from mafia.hosts.claude_code.hooks import policy
+from mafia.hosts.claude_code.hooks.prompts import PromptKind, classify_prompt
 
 
 class HookMode(StrEnum):
@@ -81,14 +83,16 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
                 state.record_agent_finished(_str(payload.get("agent_id")), caller.agent_type)
             return {}
         case "UserPromptSubmit":
-            prompt = _str(payload.get("prompt"))
-            if policy.is_task_notification(prompt):
-                if policy.notification_is_sealed(prompt):
+            prompt = classify_prompt(_str(payload.get("prompt")))
+            match prompt.kind:
+                case PromptKind.AGENT_SEALED:
                     return _sealed_notification()
-                return _blocked_notification()
-            if caller.kind is not CallerKind.MAIN:
-                return {}
-            return _human_input_output(ctx.state_factory().handle_human_input(prompt))
+                case PromptKind.AGENT_UNSEALED:
+                    return _blocked_notification()
+                case PromptKind.HUMAN:
+                    if caller.kind is not CallerKind.MAIN:
+                        return {}
+                    return _human_input_output(ctx.state_factory().handle_human_input(prompt.text))
         case _:
             return {}
 
@@ -143,7 +147,10 @@ def fail_closed(payload: Mapping[str, Any] | None, error: BaseException) -> dict
                 return _sealed_output("subagent", payload.get("tool_response") if payload else None)
             return {}
         case "UserPromptSubmit":
-            if payload and policy.is_task_notification(_str(payload.get("prompt"))):
+            if (
+                payload
+                and classify_prompt(_str(payload.get("prompt"))).kind is not PromptKind.HUMAN
+            ):
                 return _blocked_notification()
             return {
                 "decision": "block",
@@ -156,12 +163,41 @@ def fail_closed(payload: Mapping[str, Any] | None, error: BaseException) -> dict
 
 def _post_tool_use(caller: Caller, payload: Mapping[str, Any]) -> dict[str, Any]:
     tool_name = _str(payload.get("tool_name"))
+    if caller.kind is CallerKind.MAIN and policy.mcp_short_name(tool_name) in DISPLAY_TOOLS:
+        if _has_display(payload.get("tool_response")):
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": ECHO_REMINDER,
+                }
+            }
+        return {}
     if not policy.should_seal(caller, tool_name):
         return {}
     target = _mapping(payload.get("tool_input")).get("subagent_type")
     return _sealed_output(
         target if isinstance(target, str) else "subagent", payload.get("tool_response")
     )
+
+
+# Driver tools whose <display> the human must read in the chat, verbatim.
+DISPLAY_TOOLS = frozenset({"advance", "new_game", "prepare_mystery"})
+ECHO_REMINDER = (
+    "방금 받은 <display> 안의 내용을 지금 당신의 답변으로 한 글자도 빼거나 바꾸지 말고 그대로 출력하세요. "
+    "사람은 도구 결과를 볼 수 없고 당신이 쓴 글만 봅니다. 요약, 해설, '~를 작성했어요' 같은 설명은 쓰지 마세요. "
+    "출력한 뒤 <next>에 따라 진행하세요."
+)
+_DISPLAY = re.compile(r"<display>(.*?)</display>", re.DOTALL)
+
+
+def _has_display(tool_response: object) -> bool:
+    text = (
+        tool_response
+        if isinstance(tool_response, str)
+        else json.dumps(tool_response, ensure_ascii=False)
+    )
+    match = _DISPLAY.search(text)
+    return match is not None and bool(match.group(1).replace("\\n", "").strip())
 
 
 def _sealed_output(agent_type: str, tool_response: object) -> dict[str, Any]:

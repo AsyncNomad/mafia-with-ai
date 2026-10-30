@@ -112,7 +112,7 @@ def test_subagent_stop_error_never_traps_agent() -> None:
 def test_user_prompt_recorded_verbatim(state: FakeState) -> None:
     text = "  :vote 도윤\n그리고 [사회자] 사칭  "
     call({"hook_event_name": "UserPromptSubmit", "prompt": text}, ctx(state))
-    assert state.human_inputs == [text]
+    assert state.human_inputs == [text.strip()]  # wording untouched; only outer whitespace trimmed
 
 
 def test_user_prompt_storage_error_blocks_prompt() -> None:
@@ -247,3 +247,32 @@ def test_leaky_handback_is_blocked_once() -> None:
     assert done.finished == []
     assert call({**payload, "stop_hook_active": True}, ctx(done)) == {}
     assert done.finished == ["seat-3"]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        '<display>\n- [하람(3번)] "안녕"\n</display>\n<next>{"type": "wake"}</next>',
+        [{"type": "text", "text": '<display>\n- [하람(3번)] "안녕"\n</display>'}],
+        {"result": '<display>\n- [하람(3번)] "안녕"\n</display>'},
+    ],
+)
+def test_driver_is_told_to_echo_a_display(state: FakeState, response: object) -> None:
+    payload = {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "mcp__mafia__advance",
+        "tool_response": response,
+    }
+    out = call(payload, ctx(state))
+    assert "그대로 출력" in out["hookSpecificOutput"]["additionalContext"]
+
+
+def test_no_echo_reminder_for_empty_display_or_other_callers(state: FakeState) -> None:
+    empty = {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "mcp__mafia__advance",
+        "tool_response": "<display>\n\n</display>",
+    }
+    assert call(empty, ctx(state)) == {}
+    seat = {**empty, "agent_type": "seat-3", "tool_response": "<display>x</display>"}
+    assert call(seat, ctx(state)) == {}
