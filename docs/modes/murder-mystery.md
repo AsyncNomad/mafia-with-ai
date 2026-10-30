@@ -126,7 +126,7 @@ LLM은 그대로 두면 "외딴 저택·집사·유산·독살"로 수렴한다.
 
 ## 4. 시나리오 스키마 (요약)
 
-정본은 `src/mafia/modes/mystery/scenario.py`(pydantic)이다. 가시성은 P(공개), S(해당 인물 시트), G(GodOnly)로 표시한다.
+정본은 `src/mafia/modes/mystery/scenario.py`(pydantic, `schema_version: 1`)이다. 가시성은 P(공개), S(해당 인물 시트), G(GodOnly)로 표시한다. ID는 접두어로 종류를 구분한다: 인물 `c1`~`c8`, 장소 `l1`~`l6`, 카드 `k01`~, 사실 `f1`~. 정적 검증 규칙과 오류 코드는 `validate.py`가 정본이며, 규칙마다 결함 주입 테스트(`tests/unit/test_mystery_validate.py`)가 있다.
 
 ```
 Scenario
@@ -154,7 +154,8 @@ Scenario
 │       ├─ play_guide{temperament, speech_style, sample_lines[2]}
 │       └─ culprit_kit?                 # 범인만: cover_story, dangerous_clues 힌트, deflection 재료
 ├─ clues[≥32]{id, title, text, kind, location_id|starting_holder, round(0|1|2),
-│            unlock_condition?, supports: [fact_id], is_red_herring, red_herring_resolution?}  (카드 원문은 획득자·공개 시 P)
+│            unlock_condition?, supports: [fact_id], points_to: [character_id],
+│            is_red_herring, red_herring_resolution?}  (카드 원문은 획득자·공개 시 P)
 └─ narration
     ├─ prologue(P), character_intros{id: 한 줄}(P), round_intros[](P), midgame_twist(P)
     ├─ accusation_intro(P), ending_caught, ending_escaped        # 결말 시 P
