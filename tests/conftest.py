@@ -43,10 +43,15 @@ class FakeState:
     def record_agent_finished(self, agent_id: str, agent_type: str) -> None:
         self.finished.append(agent_type)
 
-    nudge: str | None = None
+    must_continue: bool = False
+    nudges_left: int = 4
 
-    def nudge_driver(self) -> str | None:
-        return self.nudge
+    def driver_must_continue(self) -> bool:
+        return self.must_continue
+
+    def spend_driver_nudge(self) -> bool:
+        self.nudges_left -= 1
+        return self.nudges_left >= 0
 
 
 @pytest.fixture(autouse=True)

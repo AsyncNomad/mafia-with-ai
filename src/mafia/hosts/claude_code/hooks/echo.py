@@ -27,7 +27,7 @@ _DISPLAY = re.compile(r"<display>(.*?)</display>", re.DOTALL)
 _IGNORED = re.compile("[\\s*_`>#|\\-\"'\u201c\u201d\u2018\u2019]")
 KEY_CHARS = 30
 # How long a tool call waits for a late transcript write before it is refused.
-SETTLE_SECONDS = 1.5
+SETTLE_SECONDS = 1.0
 _POLL_SECONDS = 0.1
 
 
@@ -130,7 +130,8 @@ def echo_reason(missing: list[str]) -> str:
     more = f"\n… 외 {len(missing) - 5}줄" if len(missing) > 5 else ""
     return (
         "직전 진행 결과(<display>)를 아직 사람에게 보여 주지 않았습니다. 사람은 도구 결과를 볼 수 없습니다. "
-        "다음 줄들을 포함해 <display> 내용 전체를 한 글자도 바꾸지 말고 먼저 답변으로 출력한 뒤, "
-        "같은 응답에서 곧바로 다시 진행하세요. 사람에게 도움을 청하거나 턴을 끝내지 마세요.\n"
+        "도구를 호출하지 말고, 다음 줄들을 포함해 <display> 내용 전체를 한 글자도 바꾸지 말고 답변 본문으로 "
+        "출력한 뒤 응답을 끝내세요(생각 속에 쓴 글은 사람에게 보이지 않습니다). "
+        "그러면 시스템이 이어서 진행하라고 알려 줍니다. 사람에게 도움을 청하지 마세요.\n"
         f"{preview}{more}"
     )

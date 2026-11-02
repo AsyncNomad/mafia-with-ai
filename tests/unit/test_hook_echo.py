@@ -111,7 +111,12 @@ def test_turn_cannot_end_before_the_display_is_shown(tmp_path: Path) -> None:
     path = transcript(tmp_path, tool_result(DISPLAY), assistant("Jane 차례예요."))
     payload = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
     assert json.loads(run(json.dumps(payload), _ctx()))["decision"] == "block"
-    assert json.loads(run(json.dumps({**payload, "stop_hook_active": True}), _ctx())) == {}
+    # Still blocked inside a continuation: the budget, not stop_hook_active, bounds the loop.
+    again = json.dumps({**payload, "stop_hook_active": True})
+    assert json.loads(run(again, _ctx()))["decision"] == "block"
+    spent = FakeState(nudges_left=0)
+    ctx = HookContext(mode=HookMode.ENFORCE, state_factory=lambda: spent, log_path=None)
+    assert json.loads(run(again, ctx)) == {}
 
 
 def test_seats_are_not_echo_gated(tmp_path: Path) -> None:

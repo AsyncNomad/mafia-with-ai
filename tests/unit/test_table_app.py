@@ -428,12 +428,12 @@ class TestDriverNudge:
     """The driver may end its turn only when the human has something to do."""
 
     def test_no_game_lets_the_driver_stop(self, app: TableApp) -> None:
-        assert app.nudge_driver() is None
+        assert not app.driver_must_continue()
 
     def test_pending_agents_keep_the_driver_going(self, app: TableApp) -> None:
         app.new_game(seed="nudge", config=DAY_START)
         assert app.advance().next.type == "wake"
-        assert app.nudge_driver() is not None
+        assert app.driver_must_continue()
 
     def test_human_turn_lets_the_driver_stop(self, app: TableApp) -> None:
         result = app.new_game(seed="nudge-human")
@@ -444,11 +444,63 @@ class TestDriverNudge:
                 break
             play_ai_turns(app, result.next.agents, rng)
         assert result.next.type == "human"
-        assert app.nudge_driver() is None
+        assert not app.driver_must_continue()
 
     def test_nudges_are_capped_until_the_driver_makes_progress(self, app: TableApp) -> None:
         app.new_game(watch=True, seed="nudge-cap")
-        nudges = [app.nudge_driver() for _ in range(5)]
-        assert all(nudges[:3]) and nudges[3:] == [None, None]  # never an endless loop
+        spent = [app.spend_driver_nudge() for _ in range(6)]
+        assert all(spent[:4]) and spent[4:] == [False, False]  # never an endless loop
         app.advance()
-        assert app.nudge_driver() is not None
+        assert app.spend_driver_nudge()
+
+
+class TestPacing:
+    """A display is its own driver step; agents are woken only from a display-free result."""
+
+    def test_display_with_agents_becomes_a_show_step(self, app: TableApp) -> None:
+        first = app.new_game(seed="pace")
+        assert first.display and first.next.type == "wake"
+        shown = first.paced()
+        assert shown.next.type == "show" and shown.display == first.display
+        again = app.advance()
+        assert again.display == "" and again.next == first.next  # same agents, nothing re-shown
+        assert again.paced() is again
+
+    def test_human_and_ended_steps_keep_their_type(self, app: TableApp) -> None:
+        from mafia.app.table import AdvanceResult, Next
+
+        for kind in ("human", "ended"):
+            step = AdvanceResult("x", Next(kind))
+            assert step.paced() is step
+
+
+@pytest.mark.parametrize("seed", [f"paced-{i}" for i in range(4)])
+def test_full_game_through_the_paced_driver_protocol(tmp_path: Path, seed: str) -> None:
+    """What the driver does: print a `show` and come back, wake on `wake`, hand over on `human`."""
+    app = make_app(tmp_path / "game.db")
+    rng = random.Random(seed)
+    result = app.new_game(seed=seed).paced()
+    shows = 0
+    for _ in range(3_000):
+        match result.next.type:
+            case "ended":
+                break
+            case "show":
+                assert result.display
+                shows += 1
+            case "wake":
+                assert not result.display  # nothing may be skipped on the way to a spawn
+                play_ai_turns(app, result.next.agents, rng)
+            case "human":
+                request = next(
+                    r for r in app.service.open_requests(app.game_id()) if r.seat == human_seat(app)
+                )
+                command = ":pass" if request.answer is not Answer.TARGET else ":vote 1"
+                if app.handle_human_input(command).kind is not HumanInputKind.SUBMITTED:
+                    app.handle_human_input(":pass")
+            case "wait":
+                raise AssertionError("nothing runs in the background here")
+        result = app.advance().paced()
+    else:
+        raise AssertionError("game did not end")
+    assert shows > 0

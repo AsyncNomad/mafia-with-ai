@@ -60,8 +60,9 @@ class NoActiveGame(LookupError):
 
 @dataclass(frozen=True, slots=True)
 class Next:
-    # wait: agents are still running in the background; end the turn and resume on notice
-    type: Literal["wake", "human", "ended", "wait"]
+    # wait: agents are still running in the background; call advance again
+    # show: print the display and end the response; the host then has the driver call advance
+    type: Literal["wake", "human", "ended", "wait", "show"]
     agents: tuple[str, ...] = ()
     parallel: bool = False
 
@@ -78,6 +79,17 @@ class AdvanceResult:
             "parallel": self.next.parallel,
         }
         return f"<display>\n{self.display}\n</display>\n<next>{json.dumps(payload)}</next>"
+
+    def paced(self) -> AdvanceResult:
+        """One step per driver response: a display is printed on its own, and only the next
+        `advance` (which re-reports the same agents) moves the game on.
+
+        Models reliably end a response with text, but often skip text they meant to write
+        before a tool call (it ends up in their thinking). So the driver never has to do both.
+        """
+        if self.display and self.next.type in ("wake", "wait"):
+            return AdvanceResult(self.display, Next("show"))
+        return self
 
 
 @dataclass
@@ -409,22 +421,19 @@ class TableApp:
                 game_id, request.request_id, agent_type, self.clock.now()
             )
 
-    def nudge_driver(self) -> str | None:
-        if not self._driver_has_work():
-            self.harness.set_driver_nudges(0)
-            return None
-        count = self.harness.driver_nudges()
-        if count >= MAX_DRIVER_NUDGES:
-            return None  # something is wrong; an endless stop/continue loop is worse
-        self.harness.set_driver_nudges(count + 1)
-        return DRIVER_NUDGE
-
-    def _driver_has_work(self) -> bool:
+    def driver_must_continue(self) -> bool:
         """True unless the game is waiting on the human (or there is nothing to run)."""
         if self._game_in_progress():
             loaded = self.service.load(self.game_id())
             return self._request_for(loaded, self._human_seat(loaded)) is None
         return self.preparation is not None and self.preparation.active() is not None
+
+    def spend_driver_nudge(self) -> bool:
+        count = self.harness.driver_nudges()
+        if count >= MAX_DRIVER_NUDGES:
+            return False
+        self.harness.set_driver_nudges(count + 1)
+        return True
 
     def handle_human_input(self, text: str) -> HumanInputOutcome:
         parsed = parse(text)
@@ -588,11 +597,8 @@ _TOOL_FOR: Mapping[Answer, str] = {
 _NIGHT_PHASES = frozenset({"mafia_chat", "night_actions"})
 
 
-MAX_DRIVER_NUDGES = 3
-DRIVER_NUDGE = (
-    "아직 턴을 끝낼 때가 아닙니다. 게임은 사람이 아니라 진행자의 다음 행동을 기다립니다. "
-    "사람에게 묻거나 설명하지 말고 곧바로 mcp__mafia__advance를 호출해 <next>대로 진행하세요."
-)
+# Stop-hook pushes allowed between two `advance` calls (each display costs one or two).
+MAX_DRIVER_NUDGES = 4
 
 
 def _not_your_turn(phase: str) -> str:

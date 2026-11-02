@@ -107,19 +107,31 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
 
 
 def _stop(caller: Caller, payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
-    """The driver may end its turn only after showing the display, and only when the game
-    waits on the human. Both checks are bounded: the echo check blocks once per stop chain,
-    and the game caps nudges that bring no progress."""
+    """The driver ends a response after printing each display; this is where the game makes it
+    continue. It may really stop only once the display is shown and the human is up.
+
+    `stop_hook_active` is not a guard here: every continuation after the first one has it set.
+    The game's nudge budget, reset by each `advance`, is what bounds the loop instead.
+    """
     if caller.kind is not CallerKind.MAIN:
         return {}
-    if not payload.get("stop_hook_active"):
-        missing = echo.unechoed(
-            _str(payload.get("transcript_path")), _str(payload.get("last_assistant_message"))
-        )
-        if missing:
-            return {"decision": "block", "reason": echo.echo_reason(missing)}
-    reason = ctx.state_factory().nudge_driver()
-    return {"decision": "block", "reason": reason} if reason else {}
+    missing = echo.unechoed(
+        _str(payload.get("transcript_path")), _str(payload.get("last_assistant_message"))
+    )
+    state = ctx.state_factory()
+    if missing:
+        reason = echo.echo_reason(missing)
+    elif state.driver_must_continue():
+        reason = CONTINUE_REASON
+    else:
+        return {}
+    return {"decision": "block", "reason": reason} if state.spend_driver_nudge() else {}
+
+
+CONTINUE_REASON = (
+    "계속 진행하세요. 게임은 사람이 아니라 진행자의 다음 행동을 기다립니다. "
+    "사람에게 묻거나 설명하지 말고 곧바로 mcp__mafia__advance를 호출해 <next>대로 진행하세요."
+)
 
 
 def _human_input_output(outcome: HumanInputOutcome) -> dict[str, Any]:
@@ -228,9 +240,9 @@ def _echo_gated(caller: Caller, tool_name: str) -> bool:
 # Driver tools whose <display> the human must read in the chat, verbatim.
 DISPLAY_TOOLS = frozenset({"advance", "new_game", "prepare_mystery"})
 ECHO_REMINDER = (
-    "방금 받은 <display> 안의 내용을 지금 당신의 답변으로 한 글자도 빼거나 바꾸지 말고 그대로 출력하세요. "
-    "사람은 도구 결과를 볼 수 없고 당신이 쓴 글만 봅니다. 요약, 해설, '~를 작성했어요' 같은 설명은 쓰지 마세요. "
-    "출력한 뒤 <next>에 따라 진행하세요."
+    "방금 받은 <display> 안의 내용을 지금 당신의 답변으로 한 글자도 빼거나 바꾸지 말고 그대로 출력하고, "
+    "도구를 호출하지 말고 응답을 끝내세요. 이어서 진행할 때가 되면 시스템이 알려 줍니다. "
+    "사람은 도구 결과를 볼 수 없고 당신이 쓴 글만 봅니다. 요약, 해설, 생각 속 출력은 보이지 않습니다."
 )
 _DISPLAY = re.compile(r"<display>(.*?)</display>", re.DOTALL)
 

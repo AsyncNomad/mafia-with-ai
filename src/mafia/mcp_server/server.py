@@ -64,14 +64,16 @@ def new_game(human_name: str = "나", watch: bool = False, mode: str = "original
     """새 게임을 시작한다. mode: "original"(마피아) 또는 "mystery"(머더 미스터리).
     human_name: 사람 플레이어 이름. watch=true면 AI 8명끼리 하는 관전 모드.
     결과의 <display>는 그대로 출력하고 <next>에 따라 진행한다."""
-    return _guard(lambda: app().new_game(mode=mode, human_name=human_name, watch=watch).to_text())
+    return _guard(
+        lambda: app().new_game(mode=mode, human_name=human_name, watch=watch).paced().to_text()
+    )
 
 
 @server.tool(structured_output=False)
 def advance() -> str:
     """게임을 진행하고, 사람에게 보여 줄 새 내용(<display>)과 다음 할 일(<next>)을 돌려준다.
     AI들이 아직 작업 중이면 최대 40초까지 기다렸다가 돌려준다."""
-    return _guard(lambda: _advance_waiting().to_text())
+    return _guard(lambda: _advance_waiting().paced().to_text())
 
 
 WAIT_LIMIT_SECONDS = 40.0
@@ -79,16 +81,14 @@ WAIT_POLL_SECONDS = 1.0
 
 
 def _advance_waiting() -> AdvanceResult:
-    """Long-poll while background agents run, so progress never depends on host notifications."""
+    """Long-poll while background agents run, so progress never depends on host notifications.
+    Returns as soon as there is something to show, so the human reads each line as it lands."""
     deadline = time.monotonic() + WAIT_LIMIT_SECONDS
     result = app().advance()
-    shown = [result.display] if result.display else []
-    while result.next.type == "wait" and time.monotonic() < deadline:
+    while result.next.type == "wait" and not result.display and time.monotonic() < deadline:
         time.sleep(WAIT_POLL_SECONDS)
         result = app().advance()
-        if result.display:
-            shown.append(result.display)
-    return AdvanceResult("\n\n".join(shown), result.next)
+    return result
 
 
 @server.tool(structured_output=False)
@@ -101,7 +101,7 @@ def status() -> str:
 def prepare_mystery(request: str = "") -> str:
     """머더 미스터리 시나리오를 새로 준비한다(설계 → 감수 → 블라인드 풀이 → 판정).
     request: 플레이어가 원하는 배경·분위기(없으면 무작위). 이후 advance 루프를 그대로 따른다."""
-    return _guard(lambda: app().prepare_mystery(request).to_text())
+    return _guard(lambda: app().prepare_mystery(request).paced().to_text())
 
 
 # --- mystery pipeline agents (caller is injected by the harness) ---------------------------

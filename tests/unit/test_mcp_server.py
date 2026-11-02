@@ -63,7 +63,7 @@ def test_advance_long_polls_while_agents_run(monkeypatch: pytest.MonkeyPatch) ->
     from mafia.app.table import AdvanceResult, Next
 
     script = [
-        AdvanceResult('- [도윤] "안녕하세요"', Next("wait")),
+        AdvanceResult("", Next("wait")),
         AdvanceResult("", Next("wait")),
         AdvanceResult('- [민지] "반가워요"', Next("human")),
     ]
@@ -76,9 +76,29 @@ def test_advance_long_polls_while_agents_run(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(server, "app", lambda: fake)
     monkeypatch.setattr(server, "WAIT_POLL_SECONDS", 0.0)
     out = server.advance()
-    assert "도윤" in out and "민지" in out  # everything shown while waiting is kept
-    assert '"type": "human"' in out
+    assert "민지" in out and '"type": "human"' in out
     assert not script
+
+
+def test_advance_returns_each_line_as_soon_as_it_lands(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mafia.app.table import AdvanceResult, Next
+
+    script = [
+        AdvanceResult("", Next("wait")),
+        AdvanceResult('- [도윤] "안녕하세요"', Next("wait")),
+        AdvanceResult('- [민지] "반가워요"', Next("human")),
+    ]
+
+    class Fake:
+        def advance(self) -> AdvanceResult:
+            return script.pop(0)
+
+    monkeypatch.setattr(server, "app", lambda: Fake())
+    monkeypatch.setattr(server, "WAIT_POLL_SECONDS", 0.0)
+    out = server.advance()
+    # Shown on its own: the driver prints it, ends the response, and calls advance again.
+    assert "도윤" in out and "민지" not in out and '"type": "show"' in out
+    assert len(script) == 1
 
 
 def test_advance_gives_up_waiting_after_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:

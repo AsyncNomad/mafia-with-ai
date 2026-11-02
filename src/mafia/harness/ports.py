@@ -46,7 +46,11 @@ class HarnessState(Protocol):
         """Apply the human's message verbatim, bypassing any model paraphrase."""
         ...
 
-    def nudge_driver(self) -> str | None:
-        """Why the driver must not end its turn yet (the game still needs it to act), or None.
-        Bounded: after a few nudges without progress the driver is let go."""
+    def driver_must_continue(self) -> bool:
+        """True while the game waits on the driver rather than on the human."""
+        ...
+
+    def spend_driver_nudge(self) -> bool:
+        """Use one 'keep going' push on a driver that tries to stop. False once the budget is
+        spent without progress (the game resets it on `advance`): looping forever is worse."""
         ...

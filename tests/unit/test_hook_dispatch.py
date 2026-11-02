@@ -56,7 +56,10 @@ class BrokenState:
     def handle_human_input(self, text: str) -> HumanInputOutcome:
         raise RuntimeError("db down")
 
-    def nudge_driver(self) -> str | None:
+    def driver_must_continue(self) -> bool:
+        raise RuntimeError("db down")
+
+    def spend_driver_nudge(self) -> bool:
         raise RuntimeError("db down")
 
 
@@ -309,9 +312,16 @@ def test_driver_cannot_stop_while_the_game_needs_it() -> None:
     # Regression: after a denied spawn the driver asked the human to "send anything" and
     # stopped, leaving the AI seats asleep.
     stop = {"hook_event_name": "Stop", "transcript_path": "", "stop_hook_active": True}
-    out = call(stop, ctx(FakeState(nudge="advance를 호출하세요")))
-    assert out == {"decision": "block", "reason": "advance를 호출하세요"}
-    assert call(stop, ctx(FakeState())) == {}
+    out = call(stop, ctx(FakeState(must_continue=True)))
+    assert out["decision"] == "block" and "advance" in out["reason"]
+    assert call(stop, ctx(FakeState())) == {}  # the human is up
+
+
+def test_driver_nudges_are_bounded() -> None:
+    stop = {"hook_event_name": "Stop", "transcript_path": "", "stop_hook_active": True}
+    state = FakeState(must_continue=True, nudges_left=2)
+    outs = [call(stop, ctx(state)) for _ in range(3)]
+    assert [o.get("decision") for o in outs] == ["block", "block", None]
 
 
 def test_stop_survives_a_state_error() -> None:
