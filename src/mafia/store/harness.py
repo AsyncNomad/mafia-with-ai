@@ -52,11 +52,37 @@ class HarnessStore:
         )
 
     # --- live runs ----------------------------------------------------------------------
-    def agent_started(self, agent_id: str, agent_type: str, at: float) -> None:
+    def agent_started(
+        self,
+        agent_id: str,
+        agent_type: str,
+        at: float,
+        *,
+        seat: int | None = None,
+        batch: str | None = None,
+    ) -> None:
         self._conn.execute(
-            "INSERT OR IGNORE INTO agent_live (agent_id, agent_type, started_at) VALUES (?, ?, ?)",
-            (agent_id, agent_type, at),
+            "INSERT OR IGNORE INTO agent_live (agent_id, agent_type, started_at, seat, batch) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (agent_id, agent_type, at, seat, batch),
         )
+
+    def run_binding(self, agent_id: str) -> tuple[int | None, str | None] | None:
+        """(seat, batch) an alias run was bound to when it started; None for an unknown run."""
+        row = self._conn.execute(
+            "SELECT seat, batch FROM agent_live WHERE agent_id = ?", (agent_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return (None if row[0] is None else int(row[0]), None if row[1] is None else str(row[1]))
+
+    def running_types(self, now: float, stale_after: float) -> set[str]:
+        rows = self._conn.execute(
+            "SELECT DISTINCT agent_type FROM agent_live WHERE finished_at IS NULL "
+            "AND started_at > ?",
+            (now - stale_after,),
+        )
+        return {str(r[0]) for r in rows}
 
     def agent_stopped(self, agent_id: str, at: float) -> None:
         self._conn.execute(
@@ -95,7 +121,10 @@ class HarnessStore:
             self._conn.execute("ROLLBACK")
             raise
 
-    def mark_alias_done(self, game_id: str, alias: str) -> None:
+    def mark_alias_done(self, game_id: str, alias: str, batch: str) -> None:
+        """Only within the batch the run was woken for: a late run from an earlier night step
+        must not use up the alias's turn in the current one."""
         self._conn.execute(
-            "UPDATE aliases SET done = 1 WHERE game_id = ? AND alias = ?", (game_id, alias)
+            "UPDATE aliases SET done = 1 WHERE game_id = ? AND alias = ? AND batch = ?",
+            (game_id, alias, batch),
         )

@@ -82,7 +82,9 @@ def test_switching_back_to_spike_removes_game_only_files(tmp_path: Path) -> None
 def test_aliases_are_seats_without_a_number(tmp_path: Path) -> None:
     write_workspace(tmp_path, spike=False, python=Path("/py/bin/python"))
     agents = tmp_path / ".claude" / "agents"
-    assert sorted(p.stem for p in agents.glob("agent-*.md")) == [f"agent-{i}" for i in range(1, 9)]
+    assert sorted(p.stem for p in agents.glob("agent-*.md")) == sorted(
+        f"agent-{i}" for i in range(1, 17)
+    )
     seat = _frontmatter((agents / "seat-2.md").read_text(encoding="utf-8"))
     alias_text = (agents / "agent-2.md").read_text(encoding="utf-8")
     alias = _frontmatter(alias_text)

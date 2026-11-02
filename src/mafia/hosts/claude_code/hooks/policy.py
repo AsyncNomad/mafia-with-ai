@@ -120,7 +120,7 @@ def _decide_handback(
 ) -> Decision:
     """Background subagents must end through a report tool. The report is the only channel
     from an agent back to the driver, so its content is replaced, never passed through."""
-    if caller.agent_type and state.needs_submission(caller.agent_type):
+    if caller.agent_type and state.needs_submission(caller.agent_type, caller.run_id or ""):
         return Deny("아직 행동을 제출하지 않았습니다. 지침에서 요구한 제출 도구를 먼저 호출하세요.")
     updated = {k: v for k, v in tool_input.items() if k != "message"}
     updated["message"] = HANDBACK
@@ -197,7 +197,7 @@ def decide_subagent_stop(
         return None
     if stop_hook_active:
         return None
-    if state.needs_submission(caller.agent_type):
+    if state.needs_submission(caller.agent_type, caller.run_id or ""):
         return "아직 행동을 제출하지 않았습니다. 지침에서 요구한 제출 도구를 호출한 뒤 끝내세요."
     if not is_sealed_handback(last_message):
         return f"제출은 끝났습니다. 최종 응답은 '{HANDBACK}' 한 마디만 쓰세요. 다른 내용은 쓰지 마세요."

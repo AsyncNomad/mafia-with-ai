@@ -513,3 +513,84 @@ def test_ai_seats_get_the_chat_voice_guide(app: TableApp) -> None:
     text = app.seat_turn(1)
     assert "## 말투" in text and ORIGINAL_VOICE in text
     assert text.index("## 당신의 인격") < text.index("## 말투") < text.index("## 당신의 역할")
+
+
+class TestOverlappingNightRuns:
+    """Regression: aliases were reshuffled on every submission, so a run still in flight was
+    handed another seat. One agent then acted for two seats, and runs whose stop the host
+    never reported left the night waiting forever."""
+
+    def _submit_for(self, app: TableApp, agent: str, run: str, rng: random.Random) -> None:
+        seat = app.seat_of(agent, run)
+        assert seat is not None
+        if not app.needs_submission(agent, run):
+            return
+        request = next(r for r in app.service.open_requests(app.game_id()) if r.seat == seat)
+        match request.answer:
+            case Answer.SPEECH:
+                app.seat_submit(seat, Answer.SPEECH, speech="조용히 가요")
+            case Answer.TARGET:
+                app.seat_submit(seat, Answer.TARGET, target=rng.choice(list(request.options)))
+            case Answer.APPROVAL:
+                app.seat_submit(seat, Answer.APPROVAL, approve=True)
+
+    def test_mapping_holds_while_the_step_runs(self, app: TableApp) -> None:
+        result = app.new_game(watch=True, seed="hold")
+        agents = result.next.agents
+        before = {a: app.seat_of(a) for a in agents}
+        for i, agent in enumerate(agents):
+            app.record_agent_started(f"r{i}", agent)
+        actor = next(i for i, a in enumerate(agents) if app.needs_submission(a, f"r{i}"))
+        self._submit_for(app, agents[actor], f"r{actor}", random.Random(0))
+        assert app.advance().next.type == "wait"  # everyone is still running; nobody re-woken
+        assert {a: app.seat_of(a) for a in agents} == before
+
+    def test_a_late_run_keeps_its_seat_and_cannot_touch_the_next_step(self, app: TableApp) -> None:
+        result = app.new_game(watch=True, seed="late")
+        agents = result.next.agents
+        runs = {a: f"r-{a}" for a in agents}
+        for agent, run in runs.items():
+            app.record_agent_started(run, agent)
+        acting = [a for a in agents if app.needs_submission(a, runs[a])]
+        dummies = [a for a in agents if a not in acting]
+        for agent in acting:  # the actors finish; the dummies are still "thinking"
+            self._submit_for(app, agent, runs[agent], random.Random(1))
+            app.record_agent_finished(runs[agent], agent)
+        nxt = app.advance()
+        assert nxt.next.type == "wake"  # the next night step has begun
+        assert not set(nxt.next.agents) & set(dummies)  # names in flight are not reused
+        late = dummies[0]
+        seat = app.seat_of(late, runs[late])
+        assert seat is not None and not app.needs_submission(late, runs[late])
+        app.record_agent_finished(runs[late], late)
+        loaded = app.service.load(app.game_id())
+        assert not any(
+            r.seat == seat and r.request_id in app.harness.finished_requests(app.game_id())
+            for r in loaded.state.core.open_requests.values()
+        )
+
+    @pytest.mark.parametrize("seed", [f"overlap-{i}" for i in range(10)])
+    def test_interleaved_runs_never_stall(self, tmp_path: Path, seed: str) -> None:
+        app = make_app(tmp_path / "game.db")
+        rng = random.Random(seed)
+        result = app.new_game(watch=True, seed=seed)
+        live: dict[str, str] = {}  # run id -> alias or seat name
+        counter = 0
+        for _ in range(5_000):
+            if result.next.type == "ended":
+                break
+            for agent in result.next.agents:
+                counter += 1
+                run = f"run-{counter}"
+                app.record_agent_started(run, agent)
+                live[run] = agent
+            if result.next.type == "wait":
+                assert live, "waiting on nobody: the game would stall here"
+            if live:
+                run = rng.choice(sorted(live))
+                agent = live.pop(run)
+                self._submit_for(app, agent, run, rng)
+                app.record_agent_finished(run, agent)
+            result = app.advance()
+        else:
+            raise AssertionError("game did not end")

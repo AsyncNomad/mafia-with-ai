@@ -41,10 +41,10 @@ class BrokenState:
     def is_awaiting(self, agent_type: str) -> bool:
         raise RuntimeError("db down")
 
-    def seat_of(self, agent_type: str) -> int | None:
+    def seat_of(self, agent_type: str, run_id: str = "") -> int | None:
         raise RuntimeError("db down")
 
-    def needs_submission(self, agent_type: str) -> bool:
+    def needs_submission(self, agent_type: str, run_id: str = "") -> bool:
         raise RuntimeError("db down")
 
     def record_agent_started(self, agent_id: str, agent_type: str) -> None:

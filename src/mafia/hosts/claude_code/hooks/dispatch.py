@@ -52,7 +52,7 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
     if ctx.mode is HookMode.OBSERVE:
         return _pre_tool_use_output(policy.Allow("observe mode")) if event == "PreToolUse" else {}
 
-    caller = _resolve(raw, ctx)
+    caller = _resolve(raw, _str(payload.get("agent_id")), ctx)
 
     match event:
         case "PreToolUse":
@@ -220,14 +220,15 @@ def _post_tool_use(caller: Caller, payload: Mapping[str, Any]) -> dict[str, Any]
 _AGENT_KINDS = (CallerKind.SEAT, CallerKind.AGENT, CallerKind.ALIAS)
 
 
-def _resolve(caller: Caller, ctx: HookContext) -> Caller:
-    """An anonymous alias acts as the seat the game secretly assigned to it, or as nobody."""
+def _resolve(caller: Caller, run_id: str, ctx: HookContext) -> Caller:
+    """An anonymous alias acts as the seat the game secretly assigned to this run, or as
+    nobody. The run id travels with the caller so later checks ask about the same run."""
     if caller.kind is not CallerKind.ALIAS or caller.agent_type is None:
-        return caller
-    seat = ctx.state_factory().seat_of(caller.agent_type)
+        return Caller(caller.kind, caller.agent_type, caller.seat, run_id or None)
+    seat = ctx.state_factory().seat_of(caller.agent_type, run_id)
     if seat is None:
-        return Caller(CallerKind.UNKNOWN, caller.agent_type)
-    return Caller(CallerKind.SEAT, caller.agent_type, seat)
+        return Caller(CallerKind.UNKNOWN, caller.agent_type, run_id=run_id or None)
+    return Caller(CallerKind.SEAT, caller.agent_type, seat, run_id or None)
 
 
 def _echo_gated(caller: Caller, tool_name: str) -> bool:

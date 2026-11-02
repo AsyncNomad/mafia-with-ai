@@ -14,7 +14,8 @@ from enum import StrEnum
 SEAT_COUNT = 8
 _SEAT_RE = re.compile(r"^seat-([1-9][0-9]*)$")
 _ALIAS_RE = re.compile(r"^agent-([1-9][0-9]*)$")
-ALIAS_COUNT = 8
+# Twice the AI seats: a new night step can always pick names no earlier run is still using.
+ALIAS_COUNT = 16
 
 
 class CallerKind(StrEnum):
@@ -30,6 +31,7 @@ class Caller:
     kind: CallerKind
     agent_type: str | None = None
     seat: int | None = None
+    run_id: str | None = None  # one run of the agent, when the host reports it
 
 
 def seat_agent_name(seat: int) -> str:

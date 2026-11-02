@@ -33,12 +33,12 @@ def test_everything_else_is_unknown(agent_type: object) -> None:
     assert classify(agent_type, KNOWN).kind is CallerKind.UNKNOWN
 
 
-@pytest.mark.parametrize("n", range(1, 9))
+@pytest.mark.parametrize("n", range(1, 17))
 def test_aliases_carry_no_seat(n: int) -> None:
     # The seat behind an alias is a game secret; identity alone must not know it.
     assert classify(f"agent-{n}", KNOWN) == Caller(CallerKind.ALIAS, f"agent-{n}")
 
 
-@pytest.mark.parametrize("agent_type", ["agent-0", "agent-9", "agent-01", "agent-", "Agent-1"])
+@pytest.mark.parametrize("agent_type", ["agent-0", "agent-17", "agent-01", "agent-", "Agent-1"])
 def test_malformed_aliases_are_unknown(agent_type: str) -> None:
     assert classify(agent_type, KNOWN).kind is CallerKind.UNKNOWN

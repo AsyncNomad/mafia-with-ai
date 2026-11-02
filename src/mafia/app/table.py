@@ -48,7 +48,19 @@ from mafia.views.seat_text import render_seat_context
 
 SEAT_COUNT = 8
 # A background run with no stop event after this long is presumed dead (host closed mid-run).
-RUN_STALE_AFTER_SECONDS = 30 * 60
+RUN_STALE_AFTER_SECONDS = 30 * 60  # scenario agents (opus) can work for many minutes
+# A player turn takes well under a minute; a run silent for this long is presumed lost (a host
+# that ends a run without SubagentStop must not stall the night forever).
+SEAT_RUN_STALE_AFTER_SECONDS = 5 * 60
+
+
+def _stale_after(agent_type: str) -> float:
+    kind = classify(agent_type, KNOWN_AGENTS).kind
+    if kind in (CallerKind.SEAT, CallerKind.ALIAS):
+        return SEAT_RUN_STALE_AFTER_SECONDS
+    return RUN_STALE_AFTER_SECONDS
+
+
 _ALIAS_RNG = random.SystemRandom()  # unpredictable on purpose: aliases must not encode seats
 PUBLIC_VIEWER = "public"
 _LOG_LINES = 25
@@ -322,45 +334,65 @@ class TableApp:
 
     # --- HarnessState (hooks) -----------------------------------------------------------
     def _running(self, agent_type: str) -> int:
-        return self.harness.running(agent_type, self.clock.now(), RUN_STALE_AFTER_SECONDS)
+        return self.harness.running(agent_type, self.clock.now(), _stale_after(agent_type))
 
     # --- covert turns: anonymous aliases ------------------------------------------------
     def _aliases(self, game_id: str) -> dict[str, tuple[int, bool]]:
         return {alias: (seat, done) for alias, seat, _batch, done in self.harness.aliases(game_id)}
 
+    def _batch(self, game_id: str) -> str:
+        return next((b for _a, _s, b, _d in self.harness.aliases(game_id)), "")
+
     def _sync_aliases(self, game_id: str, loaded: Loaded) -> dict[str, tuple[int, bool]]:
         """While covert requests are open, every living AI seat gets a random alias, so neither
-        the driver nor the UI can tell who acts (or how many act) at night."""
+        the driver nor the UI can tell who acts (or how many act) at night.
+
+        The mapping holds for a whole night step (a batch): submissions only shrink the open
+        set, and reshuffling then would hand a running agent somebody else's seat. A new batch
+        starts only when a covert request opens that the current one does not cover, and it
+        never reuses an alias name that still has a run in flight.
+        """
         core = loaded.state.core
         covert = sorted(
             r.request_id
             for r in core.open_requests.values()
             if r.covert and r.seat not in core.human_seats
         )
-        batch = ",".join(covert)
-        current = self.harness.aliases(game_id)
-        if current and all(b == batch for _a, _s, b, _d in current):
+        batch = self._batch(game_id)
+        if covert and set(covert) <= set(batch.split(",")):
             return self._aliases(game_id)
         if not covert:
-            if current:
+            if batch:
                 self.harness.replace_aliases(game_id, "", {})
             return {}
         alive: frozenset[int] = getattr(loaded.state.mode, "alive", frozenset(core.seat_numbers))
         seats = sorted(s for s in alive if s not in core.human_seats)
-        names = _ALIAS_RNG.sample(list(alias_names()), len(seats))
-        self.harness.replace_aliases(game_id, batch, dict(zip(names, seats, strict=True)))
+        busy = self.harness.running_types(self.clock.now(), SEAT_RUN_STALE_AFTER_SECONDS)
+        free = [a for a in alias_names() if a not in busy]
+        names = _ALIAS_RNG.sample(free, len(seats))
+        self.harness.replace_aliases(
+            game_id, ",".join(covert), dict(zip(names, seats, strict=True))
+        )
         return self._aliases(game_id)
 
-    def seat_of(self, agent_type: str) -> int | None:
+    def _alias_binding(self, agent_type: str, run_id: str) -> tuple[int | None, str]:
+        """The seat and batch behind an alias, for this run: a run keeps what it started with."""
+        bound = self.harness.run_binding(run_id) if run_id else None
+        if bound is not None:
+            return bound[0], bound[1] or ""
+        try:
+            game_id = self.game_id()
+        except NoActiveGame:
+            return None, ""
+        entry = self._aliases(game_id).get(agent_type)
+        return (None if entry is None else entry[0]), self._batch(game_id)
+
+    def seat_of(self, agent_type: str, run_id: str = "") -> int | None:
         caller = classify(agent_type, KNOWN_AGENTS)
         if caller.kind is CallerKind.SEAT:
             return caller.seat
         if caller.kind is CallerKind.ALIAS:
-            try:
-                entry = self._aliases(self.game_id()).get(agent_type)
-            except NoActiveGame:
-                return None
-            return None if entry is None else entry[0]
+            return self._alias_binding(agent_type, run_id)[0]
         return None
 
     def _wanted_runs(self, agent_type: str) -> int:
@@ -383,14 +415,19 @@ class TableApp:
         # A covert request is never reachable by seat name: probing seat-N must reveal nothing.
         return int(request is not None and not request.covert)
 
-    def needs_submission(self, agent_type: str) -> bool:
-        caller = classify(agent_type, KNOWN_AGENTS)
-        if caller.kind is CallerKind.ALIAS:
-            seat = self.seat_of(agent_type)
-            if seat is None:
-                return False
-            request = self._request_for(self.service.load(self.game_id()), seat)
-            return request is not None and request.covert
+    def _covert_request(self, agent_type: str, run_id: str) -> SeatRequest | None:
+        """The covert request this alias run was woken for, if it is still open."""
+        seat, batch = self._alias_binding(agent_type, run_id)
+        if seat is None:
+            return None
+        request = self._request_for(self.service.load(self.game_id()), seat)
+        if request is None or not request.covert or request.request_id not in batch.split(","):
+            return None
+        return request
+
+    def needs_submission(self, agent_type: str, run_id: str = "") -> bool:
+        if classify(agent_type, KNOWN_AGENTS).kind is CallerKind.ALIAS:
+            return self._covert_request(agent_type, run_id) is not None
         return self._wanted_runs(agent_type) > 0
 
     def is_awaiting(self, agent_type: str) -> bool:
@@ -399,8 +436,15 @@ class TableApp:
         return self._running(agent_type) < self._wanted_runs(agent_type)
 
     def record_agent_started(self, agent_id: str, agent_type: str) -> None:
+        seat, batch = None, None
+        if classify(agent_type, KNOWN_AGENTS).kind is CallerKind.ALIAS:
+            seat, batch = self._alias_binding(agent_type, "")
         self.harness.agent_started(
-            agent_id or f"anon-{agent_type}-{self.clock.now()}", agent_type, self.clock.now()
+            agent_id or f"anon-{agent_type}-{self.clock.now()}",
+            agent_type,
+            self.clock.now(),
+            seat=seat,
+            batch=batch,
         )
 
     def record_agent_finished(self, agent_id: str, agent_type: str) -> None:
@@ -410,12 +454,13 @@ class TableApp:
             game_id = self.game_id()
         except NoActiveGame:
             return
-        seat = self.seat_of(agent_type)
         if classify(agent_type, KNOWN_AGENTS).kind is CallerKind.ALIAS:
-            self.harness.mark_alias_done(game_id, agent_type)
-        if seat is None:
-            return
-        request = self._request_for(self.service.load(game_id), seat)
+            _seat, batch = self._alias_binding(agent_type, agent_id)
+            self.harness.mark_alias_done(game_id, agent_type, batch)
+            request = self._covert_request(agent_type, agent_id)
+        else:
+            seat = self.seat_of(agent_type)
+            request = None if seat is None else self._request_for(self.service.load(game_id), seat)
         if request is not None:
             self.harness.record_agent_finished(
                 game_id, request.request_id, agent_type, self.clock.now()

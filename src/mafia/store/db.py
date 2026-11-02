@@ -87,6 +87,11 @@ MIGRATIONS: Sequence[str] = (
         PRIMARY KEY (game_id, alias)
     );
     """,
+    # 6: an alias run keeps the seat and batch it started with, even if aliases are reshuffled
+    """
+    ALTER TABLE agent_live ADD COLUMN seat INTEGER;
+    ALTER TABLE agent_live ADD COLUMN batch TEXT;
+    """,
 )
 
 

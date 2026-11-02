@@ -70,11 +70,11 @@ class SpikeState:
     def spend_driver_nudge(self) -> bool:
         return False
 
-    def seat_of(self, agent_type: str) -> int | None:
+    def seat_of(self, agent_type: str, run_id: str = "") -> int | None:
         match = re.match(r"^seat-(\d+)$", agent_type)
         return int(match.group(1)) if match else None
 
-    def needs_submission(self, agent_type: str) -> bool:
+    def needs_submission(self, agent_type: str, run_id: str = "") -> bool:
         return self.is_awaiting(agent_type)
 
     def record_agent_started(self, agent_id: str, agent_type: str) -> None:

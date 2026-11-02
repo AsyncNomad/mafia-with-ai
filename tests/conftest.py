@@ -29,12 +29,12 @@ class FakeState:
 
     aliases: dict[str, int] = field(default_factory=dict[str, int])
 
-    def seat_of(self, agent_type: str) -> int | None:
+    def seat_of(self, agent_type: str, run_id: str = "") -> int | None:
         if agent_type.startswith("seat-"):
             return int(agent_type.removeprefix("seat-"))
         return self.aliases.get(agent_type)
 
-    def needs_submission(self, agent_type: str) -> bool:
+    def needs_submission(self, agent_type: str, run_id: str = "") -> bool:
         return agent_type in self.awaiting
 
     def record_agent_started(self, agent_id: str, agent_type: str) -> None:

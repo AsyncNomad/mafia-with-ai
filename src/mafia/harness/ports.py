@@ -21,13 +21,14 @@ class HumanInputOutcome:
 
 
 class HarnessState(Protocol):
-    def seat_of(self, agent_type: str) -> int | None:
-        """The seat an agent plays right now: from `seat-N`, or from the game's secret mapping
-        for an anonymous alias. None when the alias is not in use."""
+    def seat_of(self, agent_type: str, run_id: str = "") -> int | None:
+        """The seat an agent plays: from `seat-N`, or from the game's secret mapping for an
+        anonymous alias. A known run keeps the seat it started with, even if the aliases have
+        been reshuffled since. None when the alias is not in use."""
         ...
 
-    def needs_submission(self, agent_type: str) -> bool:
-        """True while the game has an open, unfulfilled request for this agent."""
+    def needs_submission(self, agent_type: str, run_id: str = "") -> bool:
+        """True while the game has an open, unfulfilled request for this agent (run)."""
         ...
 
     def is_awaiting(self, agent_type: str) -> bool:
