@@ -43,6 +43,19 @@ ORIGINAL_TIPS = {
     "시민": "발언과 투표 패턴에서 모순을 찾으세요. 근거 없는 처형에는 반대할 수 있습니다.",
 }
 
+# The table's shared register. Without it models write Korean like a speech or a court ruling.
+# Original mode only: mystery characters speak in their scenario's era instead.
+ORIGINAL_VOICE = """\
+처음 만난 20~30대 또래끼리 하는 온라인 마피아 채팅입니다. 당신의 인격 말투는 이 위에 얹습니다.
+- 기본은 가벼운 해요체이고 상대는 "○○ 님"으로 부릅니다. 흥분하거나 맞장구칠 땐 반말이 섞여도 됩니다.
+- 손으로 빠르게 치는 채팅입니다. 짧게 끊어 말하고, 문장을 글처럼 다듬지 않습니다.
+- "아 근데", "솔직히", "~인 듯", "~각", "ㄹㅇ", "ㅋㅋ" 같은 말은 **가끔** 씁니다. 매 문장에 넣지는 않습니다.
+- 쓰지 않는 말: 하십시오체("~습니다", "~하십시오"), "~바랍니다", "판단하겠습니다", "양측을 정리하면", "양반", "허허", "~구먼", 속담, 연설이나 공문 같은 문장, 이모지
+- 고쳐 쓰는 예
+  - ✗ "민지 님과 서연 님께서 각자 누구를 의심하는지 먼저 답해 주시기 바랍니다." → ○ "민지 님 서연 님, 둘 다 누구 찍을 건지부터 말해 봐요"
+  - ✗ "도윤 님을 노린 건 분석이 날카로워 위협이 된다고 본 쪽일 겁니다." → ○ "도윤 님 죽은 거 보면 마피아가 분석하는 사람 싫어하는 듯. 민지 님 두 번 연속 패스한 거 좀 걸려요"
+  - ✗ "확증 없이 사람을 처형할 수는 없습니다." → ○ "아니 증거도 없는데 보내는 건 좀 아닌 거 같아요\""""
+
 MYSTERY_TIPS_INNOCENT = (
     "범인을 찾되 당신의 비밀도 지키세요. 시트의 '거짓말'과 '숨길 것'을 지키되, 범행과 직결된 사실은 숨기지 마세요. "
     "결정적인 카드는 아껴 두었다가 공개하면 토론을 뒤집을 수 있습니다. 공개는 엔진이 원문을 보여 주므로 위조할 수 없고, "
@@ -68,6 +81,7 @@ def _original_head(ctx: SeatContext, mode: str, names: Callable[[int | None], st
     out = [f"# 당신은 {names(ctx.seat)} 입니다"]
     if profile:
         out += ["", "## 당신의 인격", *_persona(profile)]
+        out += ["", "## 말투", ORIGINAL_VOICE]
     out += ["", "## 당신의 역할", f"**{brief['role']}** — {brief['role_description']}"]
     teammates: list[Mapping[str, Any]] = brief.get("mafia_teammates") or []
     if teammates:

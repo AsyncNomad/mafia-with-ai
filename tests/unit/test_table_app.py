@@ -504,3 +504,12 @@ def test_full_game_through_the_paced_driver_protocol(tmp_path: Path, seed: str) 
     else:
         raise AssertionError("game did not end")
     assert shows > 0
+
+
+def test_ai_seats_get_the_chat_voice_guide(app: TableApp) -> None:
+    from mafia.views.seat_text import ORIGINAL_VOICE
+
+    app.new_game(watch=True, seed="voice")
+    text = app.seat_turn(1)
+    assert "## 말투" in text and ORIGINAL_VOICE in text
+    assert text.index("## 당신의 인격") < text.index("## 말투") < text.index("## 당신의 역할")
