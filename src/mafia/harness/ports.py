@@ -45,3 +45,8 @@ class HarnessState(Protocol):
     def handle_human_input(self, text: str) -> HumanInputOutcome:
         """Apply the human's message verbatim, bypassing any model paraphrase."""
         ...
+
+    def nudge_driver(self) -> str | None:
+        """Why the driver must not end its turn yet (the game still needs it to act), or None.
+        Bounded: after a few nudges without progress the driver is let go."""
+        ...

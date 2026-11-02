@@ -56,6 +56,9 @@ class BrokenState:
     def handle_human_input(self, text: str) -> HumanInputOutcome:
         raise RuntimeError("db down")
 
+    def nudge_driver(self) -> str | None:
+        raise RuntimeError("db down")
+
 
 def test_seat_forgery_rewritten(state: FakeState) -> None:
     out = call(pre("mcp__mafia__my_turn", {"seat": 1}, "seat-3"), ctx(state))
@@ -300,3 +303,17 @@ def test_alias_runs_are_recorded_by_alias_name() -> None:
     call(start, ctx(state))
     call(stop, ctx(state))
     assert state.started == ["agent-4"] and state.finished == ["agent-4"]
+
+
+def test_driver_cannot_stop_while_the_game_needs_it() -> None:
+    # Regression: after a denied spawn the driver asked the human to "send anything" and
+    # stopped, leaving the AI seats asleep.
+    stop = {"hook_event_name": "Stop", "transcript_path": "", "stop_hook_active": True}
+    out = call(stop, ctx(FakeState(nudge="advance를 호출하세요")))
+    assert out == {"decision": "block", "reason": "advance를 호출하세요"}
+    assert call(stop, ctx(FakeState())) == {}
+
+
+def test_stop_survives_a_state_error() -> None:
+    stop = {"hook_event_name": "Stop", "transcript_path": "", "stop_hook_active": False}
+    assert call(stop, ctx(BrokenState())) == {}

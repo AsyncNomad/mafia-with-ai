@@ -61,15 +61,14 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
                 caller, tool_name, _mapping(payload.get("tool_input")), ctx.state_factory()
             )
             if isinstance(decision, policy.Allow) and _echo_gated(caller, tool_name):
-                missing = echo.unechoed(_str(payload.get("transcript_path")))
+                missing = echo.unechoed(
+                    _str(payload.get("transcript_path")), settle=echo.SETTLE_SECONDS
+                )
                 if missing:
                     decision = policy.Deny(echo.echo_reason(missing))
             return _pre_tool_use_output(decision)
         case "Stop":
-            if caller.kind is not CallerKind.MAIN or payload.get("stop_hook_active"):
-                return {}
-            missing = echo.unechoed(_str(payload.get("transcript_path")))
-            return {"decision": "block", "reason": echo.echo_reason(missing)} if missing else {}
+            return _stop(caller, payload, ctx)
         case "PostToolUse":
             return _post_tool_use(caller, payload)
         case "SubagentStart":
@@ -105,6 +104,22 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
                     return _human_input_output(ctx.state_factory().handle_human_input(prompt.text))
         case _:
             return {}
+
+
+def _stop(caller: Caller, payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
+    """The driver may end its turn only after showing the display, and only when the game
+    waits on the human. Both checks are bounded: the echo check blocks once per stop chain,
+    and the game caps nudges that bring no progress."""
+    if caller.kind is not CallerKind.MAIN:
+        return {}
+    if not payload.get("stop_hook_active"):
+        missing = echo.unechoed(
+            _str(payload.get("transcript_path")), _str(payload.get("last_assistant_message"))
+        )
+        if missing:
+            return {"decision": "block", "reason": echo.echo_reason(missing)}
+    reason = ctx.state_factory().nudge_driver()
+    return {"decision": "block", "reason": reason} if reason else {}
 
 
 def _human_input_output(outcome: HumanInputOutcome) -> dict[str, Any]:

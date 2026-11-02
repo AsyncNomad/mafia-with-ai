@@ -422,3 +422,33 @@ def test_game_in_progress_takes_priority_over_preparation(tmp_path: Path) -> Non
     game = app.new_game(watch=True, seed="priority")
     assert "mystery-architect" not in game.next.agents  # the game, not the architect
     assert "mystery-architect" not in app.advance().next.agents
+
+
+class TestDriverNudge:
+    """The driver may end its turn only when the human has something to do."""
+
+    def test_no_game_lets_the_driver_stop(self, app: TableApp) -> None:
+        assert app.nudge_driver() is None
+
+    def test_pending_agents_keep_the_driver_going(self, app: TableApp) -> None:
+        app.new_game(seed="nudge", config=DAY_START)
+        assert app.advance().next.type == "wake"
+        assert app.nudge_driver() is not None
+
+    def test_human_turn_lets_the_driver_stop(self, app: TableApp) -> None:
+        result = app.new_game(seed="nudge-human")
+        rng = random.Random(3)
+        for _ in range(200):
+            result = app.advance()
+            if result.next.type != "wake":
+                break
+            play_ai_turns(app, result.next.agents, rng)
+        assert result.next.type == "human"
+        assert app.nudge_driver() is None
+
+    def test_nudges_are_capped_until_the_driver_makes_progress(self, app: TableApp) -> None:
+        app.new_game(watch=True, seed="nudge-cap")
+        nudges = [app.nudge_driver() for _ in range(5)]
+        assert all(nudges[:3]) and nudges[3:] == [None, None]  # never an endless loop
+        app.advance()
+        assert app.nudge_driver() is not None

@@ -64,6 +64,9 @@ class SpikeState:
         self._conn.execute("INSERT INTO human_inputs (text, at) VALUES (?, ?)", (text, time.time()))
         return HumanInputOutcome(HumanInputKind.PASSTHROUGH)
 
+    def nudge_driver(self) -> str | None:
+        return None  # the spike has no game loop to keep going
+
     def seat_of(self, agent_type: str) -> int | None:
         match = re.match(r"^seat-(\d+)$", agent_type)
         return int(match.group(1)) if match else None

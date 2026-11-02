@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+_DRIVER_NUDGES_KEY = "driver_nudges"
+
 
 class HarnessStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -33,6 +35,20 @@ class HarnessStore:
             "INSERT INTO cursors (game_id, viewer, last_seq) VALUES (?, ?, ?) "
             "ON CONFLICT (game_id, viewer) DO UPDATE SET last_seq = excluded.last_seq",
             (game_id, viewer, last_seq),
+        )
+
+    # --- driver nudges (Stop hook) --------------------------------------------------------
+    def driver_nudges(self) -> int:
+        row = self._conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (_DRIVER_NUDGES_KEY,)
+        ).fetchone()
+        return 0 if row is None else int(row[0])
+
+    def set_driver_nudges(self, count: int) -> None:
+        self._conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            (_DRIVER_NUDGES_KEY, str(count)),
         )
 
     # --- live runs ----------------------------------------------------------------------

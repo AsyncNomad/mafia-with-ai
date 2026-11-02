@@ -201,6 +201,7 @@ class TableApp:
         return game_id is not None and not self.service.load(game_id).state.core.ended
 
     def advance(self) -> AdvanceResult:
+        self.harness.set_driver_nudges(0)  # the driver is making progress
         # A game in progress always comes first; preparation runs only between games.
         if not self._game_in_progress():
             preparing = self._advance_preparation()
@@ -408,6 +409,23 @@ class TableApp:
                 game_id, request.request_id, agent_type, self.clock.now()
             )
 
+    def nudge_driver(self) -> str | None:
+        if not self._driver_has_work():
+            self.harness.set_driver_nudges(0)
+            return None
+        count = self.harness.driver_nudges()
+        if count >= MAX_DRIVER_NUDGES:
+            return None  # something is wrong; an endless stop/continue loop is worse
+        self.harness.set_driver_nudges(count + 1)
+        return DRIVER_NUDGE
+
+    def _driver_has_work(self) -> bool:
+        """True unless the game is waiting on the human (or there is nothing to run)."""
+        if self._game_in_progress():
+            loaded = self.service.load(self.game_id())
+            return self._request_for(loaded, self._human_seat(loaded)) is None
+        return self.preparation is not None and self.preparation.active() is not None
+
     def handle_human_input(self, text: str) -> HumanInputOutcome:
         parsed = parse(text)
         if parsed is None:
@@ -568,6 +586,13 @@ _TOOL_FOR: Mapping[Answer, str] = {
 
 
 _NIGHT_PHASES = frozenset({"mafia_chat", "night_actions"})
+
+
+MAX_DRIVER_NUDGES = 3
+DRIVER_NUDGE = (
+    "아직 턴을 끝낼 때가 아닙니다. 게임은 사람이 아니라 진행자의 다음 행동을 기다립니다. "
+    "사람에게 묻거나 설명하지 말고 곧바로 mcp__mafia__advance를 호출해 <next>대로 진행하세요."
+)
 
 
 def _not_your_turn(phase: str) -> str:

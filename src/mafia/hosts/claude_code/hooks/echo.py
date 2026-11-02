@@ -7,12 +7,17 @@ refused until every line of the latest display appears in its replies.
 
 This is a presentation guarantee, not a security boundary: if the transcript cannot be read,
 the check passes rather than stalling the game.
+
+The host may run a hook before the reply that precedes it reaches the transcript (observed on
+Stop). So the Stop hook also counts the reply the host hands over, and a tool call that looks
+unechoed re-reads the transcript for a moment before it is refused.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
@@ -21,6 +26,9 @@ _DISPLAY = re.compile(r"<display>(.*?)</display>", re.DOTALL)
 # Formatting the driver may legitimately change; content may not change.
 _IGNORED = re.compile("[\\s*_`>#|\\-\"'\u201c\u201d\u2018\u2019]")
 KEY_CHARS = 30
+# How long a tool call waits for a late transcript write before it is refused.
+SETTLE_SECONDS = 1.5
+_POLL_SECONDS = 0.1
 
 
 def _normalise(text: str) -> str:
@@ -82,8 +90,21 @@ def missing_lines(display: str, replies: str) -> list[str]:
     return missing
 
 
-def unechoed(transcript_path: str) -> list[str]:
-    """Lines of the latest display that the driver has not written yet ([] when all shown)."""
+def unechoed(transcript_path: str, written: str = "", settle: float = 0.0) -> list[str]:
+    """Lines of the latest display that the driver has not written yet ([] when all shown).
+
+    `written` is reply text known to be shown but possibly not in the transcript yet. With
+    `settle`, a non-empty result is re-checked until the transcript catches up or time runs out.
+    """
+    deadline = time.monotonic() + settle
+    while True:
+        missing = _unechoed_once(transcript_path, written)
+        if not missing or time.monotonic() >= deadline:
+            return missing
+        time.sleep(_POLL_SECONDS)
+
+
+def _unechoed_once(transcript_path: str, written: str) -> list[str]:
     try:
         raw = Path(transcript_path).read_text(encoding="utf-8")
     except OSError:
@@ -98,7 +119,10 @@ def unechoed(transcript_path: str) -> list[str]:
         if entry:
             entries.append(entry)
     found = latest_display_and_replies(entries)
-    return [] if found is None else missing_lines(*found)
+    if found is None:
+        return []
+    display, replies = found
+    return missing_lines(display, f"{replies}\n{written}")
 
 
 def echo_reason(missing: list[str]) -> str:
@@ -106,6 +130,7 @@ def echo_reason(missing: list[str]) -> str:
     more = f"\n… 외 {len(missing) - 5}줄" if len(missing) > 5 else ""
     return (
         "직전 진행 결과(<display>)를 아직 사람에게 보여 주지 않았습니다. 사람은 도구 결과를 볼 수 없습니다. "
-        "다음 줄들을 포함해 <display> 내용 전체를 한 글자도 바꾸지 말고 먼저 답변으로 출력한 뒤 다시 진행하세요.\n"
+        "다음 줄들을 포함해 <display> 내용 전체를 한 글자도 바꾸지 말고 먼저 답변으로 출력한 뒤, "
+        "같은 응답에서 곧바로 다시 진행하세요. 사람에게 도움을 청하거나 턴을 끝내지 마세요.\n"
         f"{preview}{more}"
     )

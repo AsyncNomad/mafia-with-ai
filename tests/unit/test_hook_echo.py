@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from mafia.hosts.claude_code.hooks import echo
 from mafia.hosts.claude_code.hooks.dispatch import HookContext, HookMode, run
 from mafia.hosts.claude_code.hooks.echo import missing_lines, unechoed
 from tests.conftest import FakeState
@@ -122,3 +127,35 @@ def test_seats_are_not_echo_gated(tmp_path: Path) -> None:
         json.loads(run(json.dumps(payload), _ctx()))["hookSpecificOutput"]["permissionDecision"]
         == "allow"
     )
+
+
+def test_stop_counts_the_message_the_host_hands_over(tmp_path: Path) -> None:
+    # Regression: the Stop hook ran before the reply reached the transcript and blocked a
+    # driver that had echoed correctly, which then gave up and ended its turn.
+    path = transcript(tmp_path, tool_result(DISPLAY))
+    payload = {
+        "hook_event_name": "Stop",
+        "transcript_path": path,
+        "stop_hook_active": False,
+        "last_assistant_message": DISPLAY,
+    }
+    assert json.loads(run(json.dumps(payload), _ctx())) == {}
+
+
+def test_tool_call_waits_for_the_transcript_to_catch_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(echo, "SETTLE_SECONDS", 2.0)
+    path = transcript(tmp_path, tool_result(DISPLAY))
+
+    def flush_late() -> None:
+        time.sleep(0.3)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(assistant(DISPLAY), ensure_ascii=False) + "\n")
+
+    writer = threading.Thread(target=flush_late)
+    writer.start()
+    try:
+        assert unechoed(path, settle=echo.SETTLE_SECONDS) == []
+    finally:
+        writer.join()

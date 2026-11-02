@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from mafia.harness.ports import HumanInputKind, HumanInputOutcome
+from mafia.hosts.claude_code.hooks import echo
 
 
 @dataclass
@@ -41,6 +42,17 @@ class FakeState:
 
     def record_agent_finished(self, agent_id: str, agent_type: str) -> None:
         self.finished.append(agent_type)
+
+    nudge: str | None = None
+
+    def nudge_driver(self) -> str | None:
+        return self.nudge
+
+
+@pytest.fixture(autouse=True)
+def _no_echo_settle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Denials would otherwise wait for a transcript that a test never writes."""
+    monkeypatch.setattr(echo, "SETTLE_SECONDS", 0.0)
 
 
 @pytest.fixture
