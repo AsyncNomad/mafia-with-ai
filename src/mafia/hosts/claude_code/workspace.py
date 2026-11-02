@@ -15,7 +15,7 @@ from typing import Any
 
 from mafia import paths
 from mafia.agents import MYSTERY_AGENTS, AgentSpec, ModelTier
-from mafia.harness.identity import seat_agent_name
+from mafia.harness.identity import alias_names, seat_agent_name
 from mafia.harness.tools import SEAT_TOOLS
 from mafia.hosts.claude_code import MCP_SERVER_NAME, MCP_TOOL_PREFIX
 
@@ -121,6 +121,24 @@ def game_seat_files(seat_count: int = SEAT_COUNT) -> list[AgentFile]:
     ]
 
 
+def alias_seat_files() -> list[AgentFile]:
+    """Anonymous seat slots for covert (night) turns. Identical to seats except the name, which
+    carries no seat number: the game maps each alias to a seat in secret."""
+    body = (paths.prompts_dir() / "agents" / "seat.md").read_text(encoding="utf-8")
+    return [
+        AgentFile(
+            name=alias,
+            description="마피아 게임의 익명 플레이어 슬롯. advance가 이 이름을 깨우라고 할 때만 호출한다.",
+            tools=tuple(sorted(SEAT_TOOLS)),
+            model=MODEL_FOR_TIER[ModelTier.BALANCED],
+            body=body,
+            effort="medium",
+            max_turns=10,
+        )
+        for alias in alias_names()
+    ]
+
+
 def render_skill() -> str:
     body = (paths.prompts_dir() / "skill_mafia.md").read_text(encoding="utf-8")
     return (
@@ -175,7 +193,7 @@ def write_workspace(play_dir: Path, *, spike: bool, python: Path | None = None) 
     python = python or Path(sys.executable)
     server_module = SPIKE_SERVER_MODULE if spike else "mafia.mcp_server.server"
     agents: list[AgentFile] = [agent_file_from_spec(s) for s in MYSTERY_AGENTS]
-    agents += spike_seat_files() if spike else game_seat_files()
+    agents += spike_seat_files() if spike else game_seat_files() + alias_seat_files()
 
     agents_dir = play_dir / ".claude" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)

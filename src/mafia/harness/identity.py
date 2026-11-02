@@ -13,12 +13,15 @@ from enum import StrEnum
 
 SEAT_COUNT = 8
 _SEAT_RE = re.compile(r"^seat-([1-9][0-9]*)$")
+_ALIAS_RE = re.compile(r"^agent-([1-9][0-9]*)$")
+ALIAS_COUNT = 8
 
 
 class CallerKind(StrEnum):
     MAIN = "main"  # the chat session driving the game; must only ever see public information
     SEAT = "seat"  # an AI player
     AGENT = "agent"  # a named non-seat agent (scenario architect, auditor, ...)
+    ALIAS = "alias"  # an anonymous seat slot for covert turns; the seat is known only to the game
     UNKNOWN = "unknown"  # anything else; always denied
 
 
@@ -49,6 +52,13 @@ def classify(agent_type: object, known_agents: frozenset[str]) -> Caller:
         if 1 <= seat <= SEAT_COUNT:
             return Caller(CallerKind.SEAT, agent_type, seat)
         return Caller(CallerKind.UNKNOWN, agent_type)
+    alias = _ALIAS_RE.match(agent_type)
+    if alias and 1 <= int(alias.group(1)) <= ALIAS_COUNT:
+        return Caller(CallerKind.ALIAS, agent_type)
     if agent_type in known_agents:
         return Caller(CallerKind.AGENT, agent_type)
     return Caller(CallerKind.UNKNOWN, agent_type)
+
+
+def alias_names() -> tuple[str, ...]:
+    return tuple(f"agent-{i}" for i in range(1, ALIAS_COUNT + 1))

@@ -32,7 +32,7 @@ PHASE_LABELS: Mapping[str, str] = {
     "nomination": "지목 투표",
     "defense": "최후 변론",
     "confirmation": "찬반 투표",
-    "mafia_chat": "밤 · 마피아 대화",
+    "mafia_chat": "밤",  # never reveal that a mafia chat is taking place
     "night_actions": "밤",
     "ended": "게임 종료",
 }

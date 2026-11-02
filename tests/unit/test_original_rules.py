@@ -163,9 +163,11 @@ class TestNight:
         table = Table()
         table.pass_until("mafia_chat")
         mafia = table.seats_with(Role.MAFIA)
-        (request,) = table.requests()
-        assert request.seat in mafia
-        table.answer(request.seat, speech="오늘은 3번을 노리자")
+        requests = table.requests()
+        assert sorted(r.seat for r in requests) == mafia  # simultaneous, not one by one
+        assert all(r.covert for r in requests)
+        request = requests[0]
+        table.answer(request.seat, advance=False, speech="오늘은 3번을 노리자")
         chat = table.events(MafiaChat)[-1]
         assert chat.visibility == Visibility.to_team("mafia")
         citizen = table.seats_with(Role.CITIZEN)[0]

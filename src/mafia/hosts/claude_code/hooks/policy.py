@@ -84,7 +84,7 @@ def decide_pre_tool_use(
             return _decide_seat(caller, tool_name, tool_input)
         case CallerKind.AGENT:
             return _decide_agent(caller, tool_name, tool_input)
-        case CallerKind.UNKNOWN:
+        case CallerKind.ALIAS | CallerKind.UNKNOWN:  # an alias reaches here only if unresolved
             return Deny(
                 f"알 수 없는 에이전트({caller.agent_type})는 이 워크스페이스에서 도구를 쓸 수 없습니다."
             )

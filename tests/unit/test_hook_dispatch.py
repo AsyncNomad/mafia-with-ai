@@ -41,6 +41,9 @@ class BrokenState:
     def is_awaiting(self, agent_type: str) -> bool:
         raise RuntimeError("db down")
 
+    def seat_of(self, agent_type: str) -> int | None:
+        raise RuntimeError("db down")
+
     def needs_submission(self, agent_type: str) -> bool:
         raise RuntimeError("db down")
 
@@ -276,3 +279,24 @@ def test_no_echo_reminder_for_empty_display_or_other_callers(state: FakeState) -
     assert call(empty, ctx(state)) == {}
     seat = {**empty, "agent_type": "seat-3", "tool_response": "<display>x</display>"}
     assert call(seat, ctx(state)) == {}
+
+
+def test_alias_acts_as_its_secret_seat() -> None:
+    state = FakeState(aliases={"agent-5": 2})
+    out = call(pre("mcp__mafia__my_turn", {"seat": 7}, "agent-5"), ctx(state))
+    assert decision(out) == "allow"
+    assert out["hookSpecificOutput"]["updatedInput"] == {"seat": 2}
+
+
+def test_unmapped_alias_is_denied() -> None:
+    out = call(pre("mcp__mafia__my_turn", {}, "agent-5"), ctx(FakeState()))
+    assert decision(out) == "deny"
+
+
+def test_alias_runs_are_recorded_by_alias_name() -> None:
+    state = FakeState(aliases={"agent-4": 6})
+    start = {"hook_event_name": "SubagentStart", "agent_type": "agent-4", "agent_id": "a1"}
+    stop = {**start, "hook_event_name": "SubagentStop", "last_assistant_message": "제출 완료"}
+    call(start, ctx(state))
+    call(stop, ctx(state))
+    assert state.started == ["agent-4"] and state.finished == ["agent-4"]

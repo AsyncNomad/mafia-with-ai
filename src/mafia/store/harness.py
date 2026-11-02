@@ -57,3 +57,29 @@ class HarnessStore:
             (agent_type, now - stale_after),
         ).fetchone()
         return int(row[0])
+
+    # --- covert aliases -----------------------------------------------------------------
+    def aliases(self, game_id: str) -> list[tuple[str, int, str, bool]]:
+        rows = self._conn.execute(
+            "SELECT alias, seat, batch, done FROM aliases WHERE game_id = ? ORDER BY alias",
+            (game_id,),
+        )
+        return [(str(a), int(s), str(b), bool(d)) for a, s, b, d in rows]
+
+    def replace_aliases(self, game_id: str, batch: str, mapping: dict[str, int]) -> None:
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            self._conn.execute("DELETE FROM aliases WHERE game_id = ?", (game_id,))
+            self._conn.executemany(
+                "INSERT INTO aliases (game_id, alias, seat, batch) VALUES (?, ?, ?, ?)",
+                [(game_id, alias, seat, batch) for alias, seat in mapping.items()],
+            )
+            self._conn.execute("COMMIT")
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+
+    def mark_alias_done(self, game_id: str, alias: str) -> None:
+        self._conn.execute(
+            "UPDATE aliases SET done = 1 WHERE game_id = ? AND alias = ?", (game_id, alias)
+        )

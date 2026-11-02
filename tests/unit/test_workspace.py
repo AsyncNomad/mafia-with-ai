@@ -76,3 +76,15 @@ def test_switching_back_to_spike_removes_game_only_files(tmp_path: Path) -> None
     agents = tmp_path / ".claude" / "agents"
     assert sorted(p.stem for p in agents.glob("seat-*.md")) == ["seat-1", "seat-2"]
     assert not (tmp_path / ".claude" / "skills" / "mafia" / "SKILL.md").exists()
+
+
+def test_aliases_are_seats_without_a_number(tmp_path: Path) -> None:
+    write_workspace(tmp_path, spike=False, python=Path("/py/bin/python"))
+    agents = tmp_path / ".claude" / "agents"
+    assert sorted(p.stem for p in agents.glob("agent-*.md")) == [f"agent-{i}" for i in range(1, 9)]
+    seat = _frontmatter((agents / "seat-2.md").read_text(encoding="utf-8"))
+    alias_text = (agents / "agent-2.md").read_text(encoding="utf-8")
+    alias = _frontmatter(alias_text)
+    assert alias["tools"] == seat["tools"] and alias["model"] == seat["model"]
+    assert "my_turn" in alias_text and "제출 완료" in alias_text
+    assert not any(ch.isdigit() for ch in alias["description"])

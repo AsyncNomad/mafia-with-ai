@@ -9,6 +9,7 @@ This is the single entry point used by the MCP server (driver and seat tools) an
 from __future__ import annotations
 
 import json
+import random
 import secrets
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -29,7 +30,7 @@ from mafia.engine.events import Event
 from mafia.engine.requests import Action, ActionRejected, Answer, SeatRequest
 from mafia.engine.runtime import Clock, SystemClock, rng_for
 from mafia.engine.visibility import Viewer, can_see
-from mafia.harness.identity import CallerKind, classify
+from mafia.harness.identity import CallerKind, alias_names, classify
 from mafia.harness.ports import HumanInputKind, HumanInputOutcome
 from mafia.harness.tools import KNOWN_AGENTS
 from mafia.modes.mystery.rules import cast_seats
@@ -48,6 +49,7 @@ from mafia.views.seat_text import render_seat_context
 SEAT_COUNT = 8
 # A background run with no stop event after this long is presumed dead (host closed mid-run).
 RUN_STALE_AFTER_SECONDS = 30 * 60
+_ALIAS_RNG = random.SystemRandom()  # unpredictable on purpose: aliases must not encode seats
 PUBLIC_VIEWER = "public"
 _LOG_LINES = 25
 
@@ -235,11 +237,17 @@ class TableApp:
                 parts.append(render_human_request(human_request, core.seats))
                 nxt = Next("human")
             else:
-                pending = [
+                public = [
                     f"seat-{r.seat}"
                     for r in sorted(core.open_requests.values(), key=lambda r: r.seat)
+                    if not r.covert
                 ]
-                agents = tuple(a for a in pending if self._running(a) == 0)
+                hidden = [
+                    alias
+                    for alias, (_seat, done) in sorted(self._sync_aliases(game_id, loaded).items())
+                    if not done
+                ]
+                agents = tuple(a for a in public + hidden if self._running(a) == 0)
                 # No agents to wake: every pending seat is already running in the background.
                 nxt = Next("wake", agents, parallel=len(agents) > 1) if agents else Next("wait")
         return AdvanceResult("\n\n".join(p for p in parts if p).strip(), nxt)
@@ -303,21 +311,73 @@ class TableApp:
     def _running(self, agent_type: str) -> int:
         return self.harness.running(agent_type, self.clock.now(), RUN_STALE_AFTER_SECONDS)
 
+    # --- covert turns: anonymous aliases ------------------------------------------------
+    def _aliases(self, game_id: str) -> dict[str, tuple[int, bool]]:
+        return {alias: (seat, done) for alias, seat, _batch, done in self.harness.aliases(game_id)}
+
+    def _sync_aliases(self, game_id: str, loaded: Loaded) -> dict[str, tuple[int, bool]]:
+        """While covert requests are open, every living AI seat gets a random alias, so neither
+        the driver nor the UI can tell who acts (or how many act) at night."""
+        core = loaded.state.core
+        covert = sorted(
+            r.request_id
+            for r in core.open_requests.values()
+            if r.covert and r.seat not in core.human_seats
+        )
+        batch = ",".join(covert)
+        current = self.harness.aliases(game_id)
+        if current and all(b == batch for _a, _s, b, _d in current):
+            return self._aliases(game_id)
+        if not covert:
+            if current:
+                self.harness.replace_aliases(game_id, "", {})
+            return {}
+        alive: frozenset[int] = getattr(loaded.state.mode, "alive", frozenset(core.seat_numbers))
+        seats = sorted(s for s in alive if s not in core.human_seats)
+        names = _ALIAS_RNG.sample(list(alias_names()), len(seats))
+        self.harness.replace_aliases(game_id, batch, dict(zip(names, seats, strict=True)))
+        return self._aliases(game_id)
+
+    def seat_of(self, agent_type: str) -> int | None:
+        caller = classify(agent_type, KNOWN_AGENTS)
+        if caller.kind is CallerKind.SEAT:
+            return caller.seat
+        if caller.kind is CallerKind.ALIAS:
+            try:
+                entry = self._aliases(self.game_id()).get(agent_type)
+            except NoActiveGame:
+                return None
+            return None if entry is None else entry[0]
+        return None
+
     def _wanted_runs(self, agent_type: str) -> int:
         caller = classify(agent_type, KNOWN_AGENTS)
         if caller.kind is CallerKind.AGENT:
             return 0 if self.preparation is None else self.preparation.wanted_runs(agent_type)
-        if caller.kind is not CallerKind.SEAT or caller.seat is None:
-            return 0
         try:
-            loaded = self.service.load(self.game_id())
+            game_id = self.game_id()
         except NoActiveGame:
             return 0
+        if caller.kind is CallerKind.ALIAS:
+            entry = self._aliases(game_id).get(agent_type)
+            return 0 if entry is None or entry[1] else 1  # dummies are woken once too
+        if caller.kind is not CallerKind.SEAT or caller.seat is None:
+            return 0
+        loaded = self.service.load(game_id)
         if caller.seat in loaded.state.core.human_seats:
             return 0
-        return int(self._request_for(loaded, caller.seat) is not None)
+        request = self._request_for(loaded, caller.seat)
+        # A covert request is never reachable by seat name: probing seat-N must reveal nothing.
+        return int(request is not None and not request.covert)
 
     def needs_submission(self, agent_type: str) -> bool:
+        caller = classify(agent_type, KNOWN_AGENTS)
+        if caller.kind is CallerKind.ALIAS:
+            seat = self.seat_of(agent_type)
+            if seat is None:
+                return False
+            request = self._request_for(self.service.load(self.game_id()), seat)
+            return request is not None and request.covert
         return self._wanted_runs(agent_type) > 0
 
     def is_awaiting(self, agent_type: str) -> bool:
@@ -333,14 +393,16 @@ class TableApp:
     def record_agent_finished(self, agent_id: str, agent_type: str) -> None:
         if agent_id:
             self.harness.agent_stopped(agent_id, self.clock.now())
-        caller = classify(agent_type, KNOWN_AGENTS)
-        if caller.kind is not CallerKind.SEAT or caller.seat is None:
-            return
         try:
             game_id = self.game_id()
         except NoActiveGame:
             return
-        request = self._request_for(self.service.load(game_id), caller.seat)
+        seat = self.seat_of(agent_type)
+        if classify(agent_type, KNOWN_AGENTS).kind is CallerKind.ALIAS:
+            self.harness.mark_alias_done(game_id, agent_type)
+        if seat is None:
+            return
+        request = self._request_for(self.service.load(game_id), seat)
         if request is not None:
             self.harness.record_agent_finished(
                 game_id, request.request_id, agent_type, self.clock.now()
@@ -380,7 +442,8 @@ class TableApp:
                 return _rejected("알 수 없는 명령입니다. `:help`로 명령을 확인하세요.")
             case Command.SPEECH:
                 if request is None or request.answer is not Answer.SPEECH:
-                    return HumanInputOutcome(HumanInputKind.PASSTHROUGH)
+                    # Answered by the engine, never by the driver: nothing to leak, nothing to argue.
+                    return _info(_not_your_turn(core.phase))
                 return self._submit_human(game_id, human, request, Action(speech=parsed.argument))
             case _:
                 pass
@@ -502,6 +565,15 @@ _TOOL_FOR: Mapping[Answer, str] = {
     Answer.TARGET: "submit_target",
     Answer.APPROVAL: "submit_approval",
 }
+
+
+_NIGHT_PHASES = frozenset({"mafia_chat", "night_actions"})
+
+
+def _not_your_turn(phase: str) -> str:
+    if phase in _NIGHT_PHASES:
+        return "🌙 밤입니다. 지금은 아무도 말할 수 없습니다. 밤이 지나면 무슨 일이 있었는지 알려 드립니다."
+    return "지금은 당신의 발언 차례가 아닙니다. 차례가 오면 알려 드립니다. 진행자에게 물을 땐 `:ask 질문`"
 
 
 def _info(message: str) -> HumanInputOutcome:

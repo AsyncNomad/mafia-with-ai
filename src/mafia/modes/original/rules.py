@@ -133,7 +133,7 @@ class OriginalMode:
             case MafiaChatRoundStarted.KIND:
                 b = event.body_as(MafiaChatRoundStarted)
                 order = tuple(state.alive_mafia())
-                return replace(state, round=b.round, order=order, done=frozenset())
+                return replace(state, round=b.round, order=order, done=frozenset(), opened=False)
             case RequestOpened.KIND:
                 return replace(state, opened=True)
             case ActionSubmitted.KIND:
@@ -261,8 +261,12 @@ class OriginalMode:
 
     def _night_start(self, state: OriginalState, day: int) -> list[NewEvent]:
         if self.config.mafia_chat_rounds > 0 and len(state.alive_mafia()) >= 2:
+            # Team-only: whether a chat happens at all would reveal how many mafia are alive.
             return [
-                _phase(day, Phase.MAFIA_CHAT),
+                emit(
+                    PhaseChanged(day=day, phase=Phase.MAFIA_CHAT.value),
+                    Visibility.to_team(MAFIA_TEAM),
+                ),
                 emit(MafiaChatRoundStarted(day=day, round=1), Visibility.to_team(MAFIA_TEAM)),
             ]
         return [_phase(day, Phase.NIGHT_ACTIONS)]
@@ -381,20 +385,24 @@ class OriginalMode:
 
     # --- night --------------------------------------------------------------------------
     def _mafia_chat(self, state: OriginalState, core: CoreState) -> Progress:
-        nxt = next((s for s in state.order if s in state.alive and s not in state.done), None)
-        if nxt is not None:
+        # Simultaneous per round: a sequential chat would show the driver how many mafia speak.
+        pending = [s for s in state.order if s in state.alive and s not in state.done]
+        if pending and not state.opened:
             return Progress(
                 requests=[
                     RequestSpec(
-                        seat=nxt,
+                        seat=seat,
                         kind=Kind.MAFIA_CHAT,
                         answer=Answer.SPEECH,
                         instruction=(
-                            f"{state.day}일차 밤, 마피아끼리만 보는 대화입니다. "
-                            "오늘 밤 누구를 노릴지 동료와 상의하세요(1~3문장)."
+                            f"{state.day}일차 밤, 마피아끼리만 보는 대화 {state.round}/{self.config.mafia_chat_rounds}라운드입니다. "
+                            "동료에게 오늘 밤 누구를 노리면 좋을지 이유와 함께 제안하세요(1~3문장). "
+                            "동료들도 동시에 말하며, 서로의 말은 다음 단계에서 보입니다."
                         ),
                         allow_pass=True,
+                        covert=True,
                     )
+                    for seat in pending
                 ]
             )
         if state.round < self.config.mafia_chat_rounds:
@@ -418,6 +426,7 @@ class OriginalMode:
                 instruction="오늘 밤 처치할 사람을 고르세요. 마피아들의 표가 가장 많은 사람이 대상이 됩니다.",
                 options=tuple(s for s in sorted(state.alive) if s not in mafia),
                 allow_pass=True,
+                covert=True,
             )
             for seat in sorted(mafia)
         ]
@@ -430,6 +439,7 @@ class OriginalMode:
                     instruction="오늘 밤 조사할 사람을 고르세요. 마피아인지 아닌지 당신에게만 알려 드립니다.",
                     options=tuple(s for s in sorted(state.alive) if s != police),
                     allow_pass=True,
+                    covert=True,
                 )
             )
         for doctor in state.alive_with(Role.DOCTOR):
@@ -446,6 +456,7 @@ class OriginalMode:
                     instruction="오늘 밤 마피아로부터 지킬 사람을 고르세요.",
                     options=tuple(options),
                     allow_pass=True,
+                    covert=True,
                 )
             )
         return requests

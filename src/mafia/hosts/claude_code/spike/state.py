@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import sqlite3
 import time
@@ -62,6 +63,10 @@ class SpikeState:
     def handle_human_input(self, text: str) -> HumanInputOutcome:
         self._conn.execute("INSERT INTO human_inputs (text, at) VALUES (?, ?)", (text, time.time()))
         return HumanInputOutcome(HumanInputKind.PASSTHROUGH)
+
+    def seat_of(self, agent_type: str) -> int | None:
+        match = re.match(r"^seat-(\d+)$", agent_type)
+        return int(match.group(1)) if match else None
 
     def needs_submission(self, agent_type: str) -> bool:
         return self.is_awaiting(agent_type)

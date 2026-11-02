@@ -33,6 +33,9 @@ class RequestSpec(BaseModel):
     # Display names for `options` when they are not seats (e.g. locations), same order.
     option_labels: tuple[str, ...] = ()
     allow_pass: bool = False
+    # The fact that this seat is asked is itself secret (e.g. night actions reveal roles).
+    # Hosts must not expose which seat answers a covert request (see app.table aliases).
+    covert: bool = False
 
 
 class SeatRequest(RequestSpec):

@@ -47,10 +47,12 @@ def read_mode(path: Path) -> HookMode:
 
 def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
     event = payload.get("hook_event_name")
-    caller = classify(payload.get("agent_type"), KNOWN_AGENTS)
+    raw = classify(payload.get("agent_type"), KNOWN_AGENTS)
 
     if ctx.mode is HookMode.OBSERVE:
         return _pre_tool_use_output(policy.Allow("observe mode")) if event == "PreToolUse" else {}
+
+    caller = _resolve(raw, ctx)
 
     match event:
         case "PreToolUse":
@@ -71,9 +73,10 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
         case "PostToolUse":
             return _post_tool_use(caller, payload)
         case "SubagentStart":
-            if caller.kind in (CallerKind.SEAT, CallerKind.AGENT) and caller.agent_type:
+            # Record by the raw name: a late alias whose mapping is gone must still be tracked.
+            if raw.kind in _AGENT_KINDS and raw.agent_type:
                 ctx.state_factory().record_agent_started(
-                    _str(payload.get("agent_id")), caller.agent_type
+                    _str(payload.get("agent_id")), raw.agent_type
                 )
             return {}
         case "SubagentStop":
@@ -86,8 +89,8 @@ def handle(payload: Mapping[str, Any], ctx: HookContext) -> dict[str, Any]:
             )
             if reason:
                 return {"decision": "block", "reason": reason}
-            if caller.kind in (CallerKind.SEAT, CallerKind.AGENT) and caller.agent_type:
-                state.record_agent_finished(_str(payload.get("agent_id")), caller.agent_type)
+            if raw.kind in _AGENT_KINDS and raw.agent_type:
+                state.record_agent_finished(_str(payload.get("agent_id")), raw.agent_type)
             return {}
         case "UserPromptSubmit":
             prompt = classify_prompt(_str(payload.get("prompt")))
@@ -185,6 +188,19 @@ def _post_tool_use(caller: Caller, payload: Mapping[str, Any]) -> dict[str, Any]
     return _sealed_output(
         target if isinstance(target, str) else "subagent", payload.get("tool_response")
     )
+
+
+_AGENT_KINDS = (CallerKind.SEAT, CallerKind.AGENT, CallerKind.ALIAS)
+
+
+def _resolve(caller: Caller, ctx: HookContext) -> Caller:
+    """An anonymous alias acts as the seat the game secretly assigned to it, or as nobody."""
+    if caller.kind is not CallerKind.ALIAS or caller.agent_type is None:
+        return caller
+    seat = ctx.state_factory().seat_of(caller.agent_type)
+    if seat is None:
+        return Caller(CallerKind.UNKNOWN, caller.agent_type)
+    return Caller(CallerKind.SEAT, caller.agent_type, seat)
 
 
 def _echo_gated(caller: Caller, tool_name: str) -> bool:

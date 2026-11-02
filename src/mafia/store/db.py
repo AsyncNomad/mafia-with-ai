@@ -76,6 +76,17 @@ MIGRATIONS: Sequence[str] = (
         finished_at REAL
     );
     """,
+    # 5: anonymous seat aliases for covert turns (the seat behind an alias is a game secret)
+    """
+    CREATE TABLE aliases (
+        game_id TEXT NOT NULL REFERENCES games (game_id),
+        alias   TEXT NOT NULL,
+        seat    INTEGER NOT NULL,
+        batch   TEXT NOT NULL,
+        done    INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
+        PRIMARY KEY (game_id, alias)
+    );
+    """,
 )
 
 
