@@ -165,6 +165,9 @@ def settings(python: Path) -> dict[str, Any]:
     return {
         "permissions": {"deny": list(DENIED_BUILTINS)},
         "enabledMcpjsonServers": [MCP_SERVER_NAME],
+        # The driver's thinking summaries read like game narration ("저는 시민을 맡았습니다")
+        # and are not checked by the echo gate; the chat must show only the game's own text.
+        "showThinkingSummaries": False,
         "hooks": hooks,
     }
 

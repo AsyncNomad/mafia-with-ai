@@ -40,6 +40,7 @@ def test_settings_lock_main_and_register_hooks(tmp_path: Path) -> None:
     write_workspace(tmp_path, spike=True, python=Path("/py/bin/python"))
     settings = json.loads((tmp_path / ".claude" / "settings.json").read_text(encoding="utf-8"))
     assert {"Bash", "Read", "Write", "Edit"} <= set(settings["permissions"]["deny"])
+    assert settings["showThinkingSummaries"] is False  # the chat shows game text only
     for event in ("PreToolUse", "PostToolUse", "SubagentStop", "UserPromptSubmit"):
         command = settings["hooks"][event][0]["hooks"][0]["command"]
         assert command == '"/py/bin/python" -m mafia.hosts.claude_code.hooks'
